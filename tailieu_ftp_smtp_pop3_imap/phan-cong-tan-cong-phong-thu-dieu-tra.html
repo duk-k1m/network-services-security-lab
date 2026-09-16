@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Bản phân công BTL Dịch vụ mạng — FTP, FTPS, SFTP, SMTP, POP3/IMAP với demo tấn công-phòng thủ-điều tra">
+  <title>Phân công BTL — Tấn công · Phòng thủ · Điều tra</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230b1220'/%3E%3Cpath d='M16 17h32v9H16zM16 30h21v9H16zM16 43h32v4H16z' fill='%23f6b73c'/%3E%3Ccircle cx='46' cy='34.5' r='5' fill='%23ff6b5f'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      --ink: #152235;
+      --muted: #607087;
+      --paper: #f4f7fb;
+      --card: #ffffff;
+      --line: #dce5ef;
+      --navy: #0b1220;
+      --navy-2: #121f35;
+      --gold: #f6b73c;
+      --coral: #ff6b5f;
+      --cyan: #3ec7c2;
+      --blue: #5c86ff;
+      --red: #e8453c;
+      --green: #2dba6e;
+      --purple: #8b5cf6;
+      --shadow: 0 20px 50px rgba(23, 44, 75, .10);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; color: var(--ink); background: var(--paper); font-family: "Aptos", "Trebuchet MS", sans-serif; font-size: 16px; line-height: 1.55; }
+    a { color: inherit; }
+    .wrap { width: min(1200px, calc(100% - 40px)); margin: 0 auto; }
+
+    /* TOPBAR */
+    .topbar { position: sticky; top: 0; z-index: 10; border-bottom: 1px solid rgba(220,229,239,.88); background: rgba(244,247,251,.90); backdrop-filter: blur(16px); }
+    .topbar-inner { min-height: 68px; display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+    .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; font-weight: 800; letter-spacing: -.02em; }
+    .brand-mark { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 10px; background: var(--navy); color: var(--gold); font-weight: 900; box-shadow: 4px 4px 0 var(--coral); }
+    nav { display: flex; align-items: center; gap: 5px; }
+    nav a { padding: 9px 12px; border-radius: 9px; color: var(--muted); text-decoration: none; font-size: .88rem; font-weight: 700; transition: background .2s, color .2s; }
+    nav a:hover, nav a.active { color: var(--ink); background: #e6edf7; }
+    .print-btn { border: 0; padding: 10px 13px; border-radius: 9px; background: var(--navy); color: white; font: inherit; font-size: .84rem; font-weight: 800; cursor: pointer; }
+
+    /* HERO */
+    .hero { position: relative; overflow: hidden; padding: 82px 0 68px; color: white; background: var(--navy); }
+    .hero::before, .hero::after { content: ""; position: absolute; border-radius: 999px; pointer-events: none; }
+    .hero::before { width: 480px; height: 480px; top: -280px; right: -100px; border: 1px solid rgba(62,199,194,.36); box-shadow: 0 0 0 28px rgba(62,199,194,.08), 0 0 0 56px rgba(62,199,194,.05); }
+    .hero::after { width: 220px; height: 220px; left: -100px; bottom: -145px; background: var(--coral); opacity: .85; }
+    .hero-grid { position: relative; z-index: 1; display: grid; grid-template-columns: 1.3fr .7fr; gap: 60px; align-items: end; }
+    .eyebrow { display: inline-flex; align-items: center; gap: 8px; margin: 0 0 20px; color: var(--gold); font-size: .77rem; font-weight: 900; letter-spacing: .15em; text-transform: uppercase; }
+    .eyebrow::before { content: ""; width: 27px; height: 3px; background: var(--gold); }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { max-width: 780px; margin-bottom: 18px; font-size: clamp(2.4rem, 6vw, 5rem); line-height: .98; letter-spacing: -.075em; }
+    .hero-lede { max-width: 640px; margin-bottom: 30px; color: #c4d0e1; font-size: 1.1rem; }
+    .tag-row { display: flex; flex-wrap: wrap; gap: 8px; }
+    .tag { padding: 6px 10px; border: 1px solid rgba(255,255,255,.16); border-radius: 999px; color: #e6edf7; background: rgba(255,255,255,.06); font-size: .82rem; font-weight: 700; }
+    .hero-note { padding: 22px; border: 1px solid rgba(255,255,255,.14); border-radius: 18px; background: rgba(255,255,255,.07); box-shadow: 0 16px 32px rgba(0,0,0,.16); }
+    .hero-note strong { display: block; margin-bottom: 8px; color: var(--cyan); }
+    .hero-note p { margin-bottom: 0; color: #d2dbea; font-size: .94rem; }
+
+    main { padding: 76px 0 90px; }
+    .section { scroll-margin-top: 95px; margin-bottom: 92px; }
+    .section-kicker { margin-bottom: 10px; color: var(--coral); font-size: .78rem; font-weight: 900; letter-spacing: .15em; text-transform: uppercase; }
+    h2 { margin-bottom: 14px; font-size: clamp(1.8rem, 4vw, 3rem); line-height: 1.04; letter-spacing: -.06em; }
+    .section-intro { max-width: 720px; margin-bottom: 34px; color: var(--muted); font-size: 1.04rem; }
+
+    /* SERVICE MAP */
+    .service-map { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+    .service { position: relative; min-height: 156px; padding: 18px; border: 1px solid var(--line); border-radius: 16px; background: var(--card); box-shadow: 0 8px 24px rgba(23,44,75,.05); }
+    .service::after { content: ""; position: absolute; top: 20px; right: 16px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+    .service small { display: block; margin-bottom: 24px; color: var(--muted); font-size: .74rem; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+    .service h3 { margin-bottom: 5px; font-size: 1.25rem; }
+    .service p { margin-bottom: 0; color: var(--muted); font-size: .9rem; }
+
+    /* TEAM CARDS */
+    .team-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+    .member { position: relative; overflow: hidden; padding: 27px; border: 1px solid var(--line); border-radius: 20px; background: var(--card); box-shadow: var(--shadow); }
+    .member::before { content: ""; position: absolute; width: 170px; height: 170px; top: -102px; right: -63px; border-radius: 50%; background: var(--accent); opacity: .13; }
+    .member-head { position: relative; display: flex; align-items: flex-start; justify-content: space-between; gap: 15px; margin-bottom: 22px; }
+    .member-no { color: var(--accent); font-size: .82rem; font-weight: 900; letter-spacing: .13em; }
+    .member h3 { max-width: 300px; margin-bottom: 4px; font-size: 1.45rem; letter-spacing: -.045em; }
+    .role { color: var(--muted); font-size: .9rem; font-weight: 700; }
+
+    /* PHASE BLOCKS */
+    .phases { display: grid; gap: 12px; margin-top: 18px; }
+    .phase { padding: 16px 18px; border-radius: 12px; border-left: 4px solid var(--phase-color); background: color-mix(in srgb, var(--phase-color) 7%, white); }
+    .phase-label { display: inline-block; margin-bottom: 6px; padding: 3px 8px; border-radius: 5px; color: white; background: var(--phase-color); font-size: .72rem; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+    .phase h4 { margin: 0 0 6px; font-size: 1.05rem; color: var(--ink); }
+    .phase p { margin: 0; color: var(--muted); font-size: .9rem; }
+    .deliver { display: grid; gap: 6px; margin: 10px 0 0; padding: 0; list-style: none; }
+    .deliver li { display: flex; gap: 9px; color: var(--ink); font-size: .86rem; }
+    .deliver li::before { content: "↗"; color: var(--accent); font-weight: 900; }
+
+    .member-footer { margin-top: 18px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 15px; border-top: 1px solid var(--line); color: var(--muted); font-size: .79rem; font-weight: 700; }
+    .member-footer span:last-child { color: var(--accent); }
+
+    /* INVESTIGATION SECTION */
+    .investigate-card { padding: 24px; border: 1px solid var(--line); border-radius: 16px; background: var(--card); box-shadow: 0 8px 24px rgba(23,44,75,.05); margin-top: 18px; }
+    .investigate-card h4 { margin: 0 0 8px; color: var(--purple); font-size: 1.1rem; }
+    .investigate-steps { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; counter-reset: inv; }
+    .investigate-steps li { display: flex; gap: 12px; color: var(--ink); font-size: .9rem; counter-increment: inv; }
+    .investigate-steps li::before { content: counter(inv); min-width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; background: var(--purple); color: white; font-size: .75rem; font-weight: 900; }
+
+    /* DEMO FLOW */
+    .demo-list { display: grid; gap: 14px; }
+    .demo { display: grid; grid-template-columns: 82px 1fr auto; gap: 22px; align-items: start; padding: 24px; border: 1px solid var(--line); border-radius: 16px; background: var(--card); }
+    .demo-number { color: var(--coral); font-size: 2.3rem; font-weight: 900; line-height: 1; letter-spacing: -.08em; }
+    .demo h3 { margin-bottom: 7px; font-size: 1.24rem; }
+    .demo p { margin-bottom: 0; color: var(--muted); font-size: .94rem; }
+    .demo-result { align-self: center; max-width: 165px; padding: 10px 12px; border-left: 3px solid var(--cyan); color: #315e61; background: #e8f7f6; font-size: .82rem; font-weight: 800; }
+
+    /* HANDOFF */
+    .handoff-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+    .handoff { padding: 19px; border-radius: 14px; background: var(--navy-2); color: white; }
+    .handoff b { display: block; margin-bottom: 7px; color: var(--gold); font-size: 1rem; }
+    .handoff span { display: block; color: #c4d0e1; font-size: .86rem; }
+
+    /* SAFETY */
+    .safety { display: grid; grid-template-columns: .75fr 1.25fr; gap: 25px; padding: 28px; border-radius: 20px; color: white; background: var(--navy); }
+    .safety h2 { margin-bottom: 0; color: white; }
+    .safety-copy { color: #c4d0e1; }
+    .safety-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px 24px; margin: 0; padding: 0; list-style: none; }
+    .safety-list li { display: flex; gap: 10px; color: #edf3fc; font-size: .92rem; }
+    .safety-list li::before { content: "✓"; color: var(--gold); font-weight: 900; }
+
+    footer { padding: 28px 0 38px; border-top: 1px solid var(--line); color: var(--muted); font-size: .86rem; }
+    footer .wrap { display: flex; justify-content: space-between; gap: 20px; }
+    code { padding: 2px 5px; border-radius: 5px; background: #e8eef6; color: #294467; font-family: Consolas, monospace; font-size: .88em; }
+
+    @media (max-width: 900px) {
+      .hero-grid, .safety { grid-template-columns: 1fr; gap: 28px; }
+      .service-map, .handoff-grid { grid-template-columns: repeat(3, 1fr); }
+    }
+    @media (max-width: 680px) {
+      .wrap { width: min(100% - 28px, 560px); }
+      .topbar-inner { min-height: 60px; }
+      nav { display: none; }
+      .print-btn { margin-left: auto; }
+      .hero { padding: 60px 0 54px; }
+      h1 { font-size: clamp(2.4rem, 12vw, 4rem); }
+      main { padding-top: 54px; }
+      .section { margin-bottom: 65px; }
+      .service-map, .team-grid, .handoff-grid, .safety-list { grid-template-columns: 1fr; }
+      .service { min-height: auto; }
+      .demo { grid-template-columns: 52px 1fr; gap: 15px; }
+      .demo-result { grid-column: 2; max-width: none; }
+      footer .wrap { display: block; }
+      footer p:last-child { margin-top: 8px; }
+    }
+    @media print {
+      .topbar { position: static; }
+      nav, .print-btn { display: none; }
+      .hero { padding: 32px 0; }
+      main { padding: 30px 0; }
+      .section { margin-bottom: 35px; }
+      .member, .service, .demo { box-shadow: none; break-inside: avoid; }
+      .safety { color: #152235; background: #eef3f8; }
+      .safety h2, .safety-list li { color: #152235; }
+      .safety-copy { color: #607087; }
+      footer { padding-bottom: 0; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a class="brand" href="#top" aria-label="Về đầu trang">
+        <span class="brand-mark">4×</span>
+        <span>BTL Dịch vụ mạng</span>
+      </a>
+      <nav aria-label="Điều hướng trang">
+        <a href="#tong-quan">Tổng quan</a>
+        <a href="#phan-cong">Phân công</a>
+        <a href="#demo">Demo 5 bước</a>
+        <a href="#quy-uoc">Quy ước</a>
+      </nav>
+      <button class="print-btn" type="button" onclick="window.print()">In / PDF</button>
+    </div>
+  </header>
+
+  <section class="hero" id="top">
+    <div class="wrap hero-grid">
+      <div>
+        <p class="eyebrow">Bản phân công nhóm</p>
+        <h1>Tấn công.<br>Phòng thủ.<br>Điều tra.</h1>
+        <p class="hero-lede">Mỗi thành viên phụ trách trọn một dịch vụ từ nguyên lý → demo tấn công có kiểm soát → áp dụng biện pháp phòng thủ → điều tra forensics trên chính bằng chứng thu được.</p>
+        <div class="tag-row" aria-label="Các giao thức">
+          <span class="tag">FTP</span>
+          <span class="tag">FTPS</span>
+          <span class="tag">SFTP / SSH</span>
+          <span class="tag">SMTP</span>
+          <span class="tag">POP3 + IMAP</span>
+        </div>
+      </div>
+      <aside class="hero-note">
+        <strong>Nguyên tắc chia việc mới</strong>
+        <p>Mỗi người 1 dịch vụ riêng biệt. Mỗi demo gồm 3 pha: <strong style="color:#e8453c">Tấn công</strong> → <strong style="color:#2dba6e">Phòng thủ</strong> → <strong style="color:#8b5cf6">Điều tra</strong>. Không ai chỉ làm "lý thuyết" hay chỉ làm "thực hành".</p>
+      </aside>
+    </div>
+  </section>
+
+  <main>
+    <!-- TỔNG QUAN -->
+    <section class="section" id="tong-quan">
+      <div class="wrap">
+        <p class="section-kicker">01 / Bản đồ đề tài</p>
+        <h2>Nhìn nhanh là biết ai làm gì</h2>
+        <p class="section-intro">5 dịch vụ chia cho 4 người. FTPS tách riêng khỏi FTP để mỗi người có đúng 1 câu chuyện hoàn chỉnh. POP3 và IMAP đi chung vì cùng Dovecot cung cấp.</p>
+        <div class="service-map">
+          <article class="service" style="--accent: var(--gold)"><small>Người 1</small><h3>FTP</h3><p>Plaintext, active/passive, sniffing.</p></article>
+          <article class="service" style="--accent: var(--coral)"><small>Người 2</small><h3>FTPS</h3><p>FTP + TLS explicit/implicit.</p></article>
+          <article class="service" style="--accent: var(--blue)"><small>Người 3</small><h3>SFTP</h3><p>File transfer trên SSH tunnel.</p></article>
+          <article class="service" style="--accent: var(--red)"><small>Người 4</small><h3>SMTP</h3><p>Gửi thư, relay, AUTH + TLS.</p></article>
+          <article class="service" style="--accent: var(--cyan)"><small>Người 4</small><h3>POP3 + IMAP</h3><p>Nhận thư, mailbox, đồng bộ.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <!-- PHÂN CÔNG CHI TIẾT -->
+    <section class="section" id="phan-cong">
+      <div class="wrap">
+        <p class="section-kicker">02 / Phân công chi tiết</p>
+        <h2>Mỗi người một câu chuyện hoàn chỉnh</h2>
+        <p class="section-intro">Ba pha <strong>Tấn công → Phòng thủ → Điều tra</strong> tạo thành vòng lặp khép kín. Phần điều tra không phải "làm thêm" mà là cách chứng minh bạn thực sự hiểu những gì mình vừa demo.</p>
+        <div class="team-grid">
+
+          <!-- NGƯỜI 1: FTP -->
+          <article class="member" style="--accent: var(--gold)">
+            <div class="member-head">
+              <div><h3>Người 1 · FTP</h3><span class="role">Sniffing plaintext & credential theft</span></div>
+              <span class="member-no">01</span>
+            </div>
+            <div class="phases">
+              <div class="phase" style="--phase-color: var(--red)">
+                <span class="phase-label">🔴 Tấn công</span>
+                <h4>Sniff FTP credentials & data</h4>
+                <p>Dùng Wireshark/tcpdump bắt gói tin FTP plaintext trong lab. Trích xuất username, password và nội dung file truyền đi từ capture. Chứng minh FTP gửi mọi thứ dưới dạng cleartext.</p>
+                <ul class="deliver">
+                  <li>File <code>.pcapng</code> chứa phiên FTP đầy đủ</li>
+                  <li>Ảnh chụp filter Wireshark hiển thị USER/PASS/command</li>
+                  <li>Bảng liệt kê thông tin nhạy cảm bị lộ</li>
+                </ul>
+              </div>
+              <div class="phase" style="--phase-color: var(--green)">
+                <span class="phase-label">🟢 Phòng thủ</span>
+                <h4>Chuyển sang FTPS hoặc SFTP</h4>
+                <p>Bật TLS trên vsftpd (explicit FTPS) hoặc chuyển hẳn sang SFTP. So sánh cùng thao tác trước/sau: Wireshark không còn đọc được nội dung. Cấu hình <code>ssl_enable=YES</code>, <code>force_local_logins_ssl=YES</code>.</p>
+                <ul class="deliver">
+                  <li>Cấu hình vsftpd trước và sau</li>
+                  <li>PCAP "sau" chứng minh dữ liệu đã mã hóa</li>
+                  <li>Test login thành công qua FTPS</li>
+                </ul>
+              </div>
+              <div class="phase" style="--phase-color: var(--purple)">
+                <span class="phase-label">🟣 Điều tra</span>
+                <h4>Phân tích forensic trên PCAP đã bắt</h4>
+                <p>Từ file capture ở pha tấn công: dựng timeline sự kiện (kết nối → login → lệnh → truyền file → ngắt), xác định chính xác thời điểm credential bị lộ, trích xuất file đã truyền bằng Wireshark Export Objects. Viết báo cáo điều tra ngắn: "Ai? Khi nào? Dữ liệu nào bị rò rỉ? Mức độ nghiêm trọng?"</p>
+              </div>
+            </div>
+            <div class="member-footer"><span>Báo cáo: §2a + §4a + §6.1 + §Forensics</span><span>FTP</span></div>
+          </article>
+
+          <!-- NGƯỜI 2: FTPS -->
+          <article class="member" style="--accent: var(--coral)">
+            <div class="member-head">
+              <div><h3>Người 2 · FTPS</h3><span class="role">TLS misconfiguration & downgrade attack</span></div>
+              <span class="member-no">02</span>
+            </div>
+            <div class="phases">
+              <div class="phase" style="--phase-color: var(--red)">
+                <span class="phase-label">🔴 Tấn công</span>
+                <h4>TLS downgrade / cert validation bypass</h4>
+                <p>Trong lab: cấu hình FTPS sai (cho phép fallback plaintext, dùng cipher yếu, self-signed cert không verify). Demo client kết nối "FTPS" nhưng thực tế vẫn truyền plaintext do server chấp nhận non-TLS. Hoặc dùng <code>openssl s_client</code> chỉ ra cipher suite yếu (RC4, DES, TLSv1.0).</p>
+                <ul class="deliver">
+                  <li>Transcript kết nối "FTPS giả" vẫn đọc được dữ liệu</li>
+                  <li>Output <code>openssl s_client</code> hiện cipher/protocol yếu</li>
+                  <li>Ảnh chụp cảnh báo certificate bị bỏ qua</li>
+                </ul>
+              </div>
+              <div class="phase" style="--phase-color: var(--green)">
+                <span class="phase-label">🟢 Phòng thủ</span>
+                <h4>Hardening TLS configuration</h4>
+                <p>Cấu hình vsftpd: <code>ssl_tlsv1_2=YES</code>, <code>ssl_tlsv1_3=YES</code>, tắt TLSv1.0/1.1, chỉ cho cipher mạnh, <code>require_ssl_reuse=NO</code> (hoặc YES tùy ngữ cảnh), bật verify cert nếu dùng internal CA. Test lại: client không thể connect nếu không dùng TLS ≥ 1.2.</p>
+                <ul class="deliver">
+                  <li>Cấu hình TLS hardened</li>
+                  <li>Test nmap ssl-enum-ciphers xác nhận chỉ cipher mạnh</li>
+                  <li>Kết nối thất bại khi cố downgrade</li>
+                </ul>
+              </div>
+              <div class="phase" style="--phase-color: var(--purple)">
+                <span class="phase-label">🟣 Điều tra</span>
+                <h4>Audit log TLS negotiation failures</h4>
+                <p>Phân tích vsftpd.log và auth.log sau pha tấn công: tìm các dòng "SSL connection failed", "Connection refused: SSL required", đếm số lần negotiate thất bại theo IP/thời gian. Xây dựng biểu đồ tần suất → phát hiện pattern tấn công downgrade. Viết timeline: attacker thử bao nhiêu lần, vào lúc nào, cipher nào bị reject.</p>
+              </div>
+            </div>
+            <div class="member-footer"><span>Báo cáo: §2a + §4a + §6.1 + §Forensics</span><span>FTPS</span></div>
+          </article>
+
+          <!-- NGƯỜI 3: SFTP -->
+          <article class="member" style="--accent: var(--blue)">
+            <div class="member-head">
+              <div><h3>Người 3 · SFTP / SSH</h3><span class="role">Brute-force & key-based hardening</span></div>
+              <span class="member-no">03</span>
+            </div>
+            <div class="phases">
+              <div class="phase" style="--phase-color: var(--red)">
+                <span class="phase-label">🔴 Tấn công</span>
+                <h4>SSH brute-force trên lab</h4>
+                <p>Dùng Hydra/Medusa (chỉ trên VM lab!) thử dictionary attack vào SSH user yếu. Ghi nhận số lần thử/thành công, thời gian crack. Đồng thời demo weak password policy: user dùng pass "123456" bị chiếm trong vài giây.</p>
+                <ul class="deliver">
+                  <li>Log brute-force: số attempts, thời gian, kết quả</li>
+                  <li>Auth.log chụp failed passwords liên tiếp</li>
+                  <li>Screenshot tool tấn công (blur sensitive info)</li>
+                </ul>
+              </div>
+              <div class="phase" style="--phase-color: var(--green)">
+                <span class="phase-label">🟢 Phòng thủ</span>
+                <h4>Key-only auth + chroot + Fail2ban</h4>
+                <p>Tắt password auth (<code>PasswordAuthentication no</code>), bật Ed25519 key-only, cấu hình chroot jail cho SFTP user, cài Fail2ban ban IP sau N lần fail. Test: key hợp lệ vẫn vào, password bị từ chối, brute-force bị ban.</p>
+                <ul class="deliver">
+                  <li>sshd_config trước/sau</li>
+                  <li>Fail2ban status + jail config</li>
+                  <li>Retest: legitimate access OK, attack blocked</li>
+                </ul>
+              </div>
+              <div class="phase" style="--phase-color: var(--purple)">
+                <span class="phase-label">🟣 Điều tra</span>
+                <h4>Forensic analysis trên auth.log</h4>
+                <p>Từ auth.log thu được: trích xuất tất cả failed attempts, group by source IP, tính frequency/timing pattern. Xác định top offending IPs, thời gian cao điểm tấn công, username bị nhắm nhiều nhất. So sánh trước/sau Fail2ban: số attempts giảm bao nhiêu %, ban events xảy ra khi nào. Viết incident report ngắn.</p>
+              </div>
+            </div>
+            <div class="member-footer"><span>Báo cáo: §2a + §4a + §6.3/6.6 + §Forensics</span><span>SSH/SFTP</span></div>
+          </article>
+
+          <!-- NGƯỜI 4: SMTP -->
+          <article class="member" style="--accent: var(--red)">
+            <div class="member-head">
+              <div><h3>Người 4 · SMTP</h3><span class="role">Open relay abuse & spam prevention</span></div>
+              <span class="member-no">04</span>
+            </div>
+            <div class="phases">
+              <div class="phase" style="--phase-color: var(--red)">
+                <span class="phase-label">🔴 Tấn công</span>
+                <h4>Exploit open relay (lab isolated)</h4>
+                <p>Cấu hình Postfix sai (<code>mynetworks</code> quá rộng, thiếu <code>smtpd_recipient_restrictions</code>). Từ máy khác trong lab, gửi mail đến domain ngoài (.test) → server chấp nhận relay. Chứng minh attacker dùng server làm spam relay. Capture transcript <code>250 OK</code> cho recipient ngoài.</p>
+                <ul class="deliver">
+                  <li>Transcript SMTP relay thành công (250 OK)</li>
+                  <li>mail.log showing relay abuse</li>
+                  <li>Sơ đồ luồng mail bị exploit</li>
+                </ul>
+              </div>
+              <div class="phase" style="--phase-color: var(--green)">
+                <span class="phase-label">🟢 Phòng thủ</span>
+                <h4>Close relay + enforce AUTH/TLS on 587</h4>
+                <p>Thu hẹp <code>mynetworks</code>, bật <code>smtpd_recipient_restrictions</code> reject_unauth_destination, yêu cầu SASL auth trên port 587, bật STARTTLS. Retest: relay ngoài bị reject (554), gửi nội bộ qua 587+AUTH vẫn hoạt động.</p>
+                <ul class="deliver">
+                  <li>main.cf trước/sau</li>
+                  <li>Transcript 554 Relay access denied</li>
+                  <li>Gửi mail nội bộ TLS+AUTH thành công</li>
+                </ul>
+              </div>
+              <div class="phase" style="--phase-color: var(--purple)">
+                <span class="phase-label">🟣 Điều tra</span>
+                <h4>Mail queue forensics & log correlation</h4>
+                <p>Từ mail.log: truy vết queue ID của các mail relay trái phép, xác định nguồn IP, timestamp, recipient list. Đếm volume mail bất thường/giờ so với baseline. Correlate với auth.log (có login hợp lệ nào bị chiếm?). Xây dựng timeline cuộc tấn công relay và viết short incident report.</p>
+              </div>
+            </div>
+            <div class="member-footer"><span>Báo cáo: §2b + §4b + §6.9/6.11 + §Forensics</span><span>POSTFIX</span></div>
+          </article>
+
+          <!-- NGƯỜI 4 (PHẦN 2): POP3 + IMAP -->
+          <article class="member" style="--accent: var(--cyan)">
+            <div class="member-head">
+              <div><h3>Người 4 · POP3 / IMAP</h3><span class="role">Plaintext auth & mailbox exfiltration</span></div>
+              <span class="member-no">04+</span>
+            </div>
+            <div class="phases">
+              <div class="phase" style="--phase-color: var(--red)">
+                <span class="phase-label">🔴 Tấn công</span>
+                <h4>Sniff POP3/IMAP credentials & pull mailbox</h4>
+                <p>Kết nối POP3 (port 110) / IMAP (port 143) plaintext trong lab. Bắt gói → trích xuất user/pass. Sau khi có credential, dùng client kéo toàn bộ mailbox về máy attacker (data exfiltration). Với IMAP: demo SELECT INBOX + FETCH toàn bộ messages.</p>
+                <ul class="deliver">
+                  <li>PCAP chứa POP3/IMAP plaintext session</li>
+                  <li>Ảnh captured credentials</li>
+                  <li>Screenshot mailbox bị exfiltrate</li>
+                </ul>
+              </div>
+              <div class="phase" style="--phase-color: var(--green)">
+                <span class="phase-label">🟢 Phòng thủ</span>
+                <h4>Enforce POP3S (995) / IMAPS (993) + disable plaintext</h4>
+                <p>Dovecot: <code>ssl = required</code>, <code>disable_plaintext_auth = yes</code>, cấu hình TLS cert, tắt port 110/143 hoặc redirect lên 995/993. Test: openssl s_client verify TLS, client Thunderbird kết nối IMAPS thành công, plaintext bị reject.</p>
+                <ul class="deliver">
+                  <li>doveconf output before/after</li>
+                  <li>openssl s_client test on 993/995</li>
+                  <li>Plaintext connection rejected log</li>
+                </ul>
+              </div>
+              <div class="phase" style="--phase-color: var(--purple)">
+                <span class="phase-label">🟣 Điều tra</span>
+                <h4>Detect mailbox exfiltration via Dovecot logs</h4>
+                <p>Từ Dovecot auth/mail log: tìm sessions login từ IP lạ, đếm số FETCH/RETR commands bất thường (volume spike), so sánh bytes transferred vs baseline. Phát hiện dấu hiệu "kéo sạch mailbox": nhiều RETR liên tiếp + logout ngay sau đó. Timeline: credential bị lộ lúc nào → mailbox bị exfiltrate lúc nào → bao nhiêu mail bị lấy.</p>
+              </div>
+            </div>
+            <div class="member-footer"><span>Báo cáo: §2b + §4b + §6.2 + §Forensics</span><span>DOVECOT</span></div>
+          </article>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- DEMO FLOW 5 BƯỚC -->
+    <section class="section" id="demo">
+      <div class="wrap">
+        <p class="section-kicker">03 / Quy trình demo thống nhất</p>
+        <h2>5 bước cho mọi demo — kể cả điều tra</h2>
+        <p class="section-intro">So với bản cũ (4 bước), bản mới thêm bước 5 "Điều tra forensics" để biến mỗi demo thành một case study hoàn chỉnh.</p>
+        <div class="demo-list">
+          <article class="demo">
+            <div class="demo-number">01</div>
+            <div>
+              <h3>Ghi nhận trạng thái yếu (baseline)</h3>
+              <p>Chụp cấu hình hiện tại, cổng đang mở, user/file giả, snapshot VM. Nói rõ đây là mạng Host-only/Internal. Đây là "hiện trường gốc" để đối chiếu sau này.</p>
+            </div>
+            <div class="demo-result">Ảnh + config "trước"</div>
+          </article>
+          <article class="demo">
+            <div class="demo-number">02</div>
+            <div>
+              <h3>Thực hiện tấn công có kiểm soát</h3>
+              <p>Đúng 1 kịch bản: sniff FTP, downgrade TLS, brute-force SSH, exploit open relay, hoặc exfiltrate mailbox. <strong>Lưu toàn bộ bằng chứng</strong>: PCAP, transcript, log — đây là nguyên liệu cho bước 5.</p>
+            </div>
+            <div class="demo-result">PCAP / transcript / log</div>
+          </article>
+          <article class="demo">
+            <div class="demo-number">03</div>
+            <div>
+              <h3>Áp dụng biện pháp phòng thủ</h3>
+              <p>TLS, key-only, chroot, relay restriction, disable plaintext auth... tương ứng dịch vụ. Ghi lại mọi thay đổi cấu hình (diff trước/sau).</p>
+            </div>
+            <div class="demo-result">Config "sau" + diff</div>
+          </article>
+          <article class="demo">
+            <div class="demo-number">04</div>
+            <div>
+              <h3>Kiểm thử lại (retest)</h3>
+              <p>Chứng minh: nguy cơ đã bị chặn + người dùng hợp lệ vẫn hoạt động bình thường. Nêu giới hạn: biện pháp này chưa xử lý được gì.</p>
+            </div>
+            <div class="demo-result">Bảng trước / sau</div>
+          </article>
+          <article class="demo">
+            <div class="demo-number">05</div>
+            <div>
+              <h3>🔍 Điều tra forensics trên bằng chứng đã thu</h3>
+              <p>Quay lại PCAP/log/transcript từ bước 2. Dựng timeline, trích xuất artifacts, tính metrics (frequency, volume, entropy), viết incident report ngắn. Đây là phần chứng minh bạn <em>hiểu</em> chứ không chỉ <em>chạy lệnh</em>.</p>
+            </div>
+            <div class="demo-result">Timeline + report</div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- QUY ƯỚC NỘP -->
+    <section class="section" id="quy-uoc">
+      <div class="wrap">
+        <p class="section-kicker">04 / Bộ hồ sơ ghép chung</p>
+        <h2>Mỗi thành viên nộp cùng một định dạng</h2>
+        <div class="handoff-grid">
+          <div class="handoff"><b>01 · Lý thuyết</b><span>1–2 trang: luồng, port, vai trò client/server.</span></div>
+          <div class="handoff"><b>02 · Tấn công</b><span>Kịch bản, điều kiện, mức ảnh hưởng.</span></div>
+          <div class="handoff"><b>03 · Phòng thủ</b><span>Config trước/sau, quyền tối thiểu, TLS.</span></div>
+          <div class="handoff"><b>04 · Retest</b><span>Bảng so sánh, giới hạn biện pháp.</span></div>
+          <div class="handoff"><b>05 · Điều tra</b><span>Timeline, artifacts, metrics, incident report.</span></div>
+          <div class="handoff"><b>06 · Bằng chứng</b><span>Ảnh, PCAP, transcript, log excerpts.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SAFETY -->
+    <section class="section">
+      <div class="wrap safety">
+        <div>
+          <p class="section-kicker">Luôn giữ trong slide cuối</p>
+          <h2>Lab an toàn<br>trước hết</h2>
+        </div>
+        <div>
+          <p class="safety-copy">Các demo tấn công và điều tra chỉ có giá trị khi thực hiện trong phạm vi nhóm sở hữu và có thể khôi phục.</p>
+          <ul class="safety-list">
+            <li>Chỉ dùng Host-only / Internal Network.</li>
+            <li>Dùng credential và file giả.</li>
+            <li>Không gửi mail ra Internet thật.</li>
+            <li>Snapshot VM trước mỗi demo.</li>
+            <li>Chỉ test IP trong dải lab.</li>
+            <li>Xóa queue, unban, restore sau khi xong.</li>
+            <li>Blur/redact thông tin nhạy cảm trong screenshot.</li>
+            <li>Không chia sẻ PCAP chứa credential thật.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <p><strong>BTL Dịch vụ mạng</strong> · Bản phân công nhóm v2 — Tấn công · Phòng thủ · Điều tra</p>
+      <p>FTP · FTPS · SFTP · SMTP · POP3 · IMAP</p>
+    </div>
+  </footer>
+
+  <script>
+    const links = [...document.querySelectorAll('nav a')];
+    const sections = links.map(l => document.querySelector(l.getAttribute('href'))).filter(Boolean);
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(e => {
+        if (!e.isIntersecting) return;
+        links.forEach(l => l.classList.toggle('active', l.getAttribute('href') === '#' + e.target.id));
+      });
+    }, { rootMargin: '-35% 0px -55% 0px' });
+    sections.forEach(s => observer.observe(s));
+  </script>
+</body>
+</html>
