@@ -1,0 +1,4449 @@
+# Dịch vụ FTP, SFTP, SMTP, POP3 và IMAP: nguyên lý hoạt động, cài đặt, quản trị, nguy cơ bị tấn công, kỹ thuật phát hiện sớm và biện pháp phòng ngừa
+
+## Lời mở đầu
+
+Tài liệu này là sản phẩm nghiên cứu của đồ án Hệ điều hành Windows–Linux, tập trung vào năm dịch vụ mạng kinh điển mà mọi quản trị viên hệ thống Unix-like đều phải gặp: **FTP** và **SFTP** cho truyền tệp, **SMTP**, **POP3** và **IMAP** cho hệ thống thư điện tử. Đối tượng hướng tới là sinh viên công nghệ thông tin và người quản trị hệ thống muốn hiểu *bản chất* giao thức — kiến trúc kênh, phiên lệnh, bắt tay TLS — thay vì chỉ copy-paste cấu hình; bởi phần lớn sự cố bảo mật thực tế bắt nguồn từ cấu hình sai (misconfiguration) mà người vận hành không đủ nền tảng để nhận ra.
+
+Phạm vi tài liệu trải suốt vòng đời khai thác một dịch vụ: từ nền tảng mạng (TCP/UDP, port, mô hình client–server, Active/Passive), nguyên lý hoạt động từng giao thức, cài đặt và quản trị trên Ubuntu Server (vsftpd, OpenSSH, Postfix, Dovecot), công cụ phía client và giám sát (FileZilla, Thunderbird, Wireshark, UFW, Fail2ban, nhật ký hệ thống), đến phân tích nguy cơ tấn công, kỹ thuật phát hiện sớm qua log/metric, biện pháp phòng ngừa và gia cố, thiết kế phòng lab cùng ba kịch bản demo, và cuối cùng là chuẩn bị báo cáo. Hệ thống phụ lục A–F hỗ trợ lộ trình học theo thứ tự, kế hoạch 7 ngày, thuật ngữ, câu tự kiểm tra và danh mục tài liệu chuẩn (RFC, tài liệu Ubuntu).
+
+**Cam kết đạo đức và an toàn:** mọi kỹ thuật tấn công trong tài liệu chỉ được mô tả ở mức nguyên lý và dấu hiệu nhận biết, phục vụ mục đích giáo dục. Toàn bộ thao tác thực hành **chỉ được phép diễn ra trong phòng lab mạng riêng do nhóm tự dựng** (mạng host-only/NAT giữa các máy ảo thuộc quyền kiểm soát của nhóm). **Không** quét cổng, dò mật khẩu, giả mạo thư, chặn phiên (MITM) hay thực hiện bất kỳ hành vi nào tương tự trên hệ thống công cộng, máy chủ của bên thứ ba hoặc mạng không thuộc sở hữu của bạn — những hành vi đó vi phạm pháp luật an ninh mạng và quy chế của mọi tổ chức.
+
+## Hướng dẫn đọc
+
+- **Chương 1 — Kiến thức mạng nền tảng:** nên đọc trước nếu bạn chưa vững về TCP/UDP, cổng dịch vụ, mô hình client–server, DNS/MX, NAT và tường lửa — nền móng để hiểu mọi chương sau.
+- **Chương 2a — Nguyên lý FTP/FTPS/SFTP:** kiến trúc hai kênh của FTP, Active vs Passive, khác biệt bản chất giữa FTPS và SFTP, phiên giao dịch mẫu và cách quan sát trong lab.
+- **Chương 2b — Nguyên lý email (SMTP/POP3/IMAP):** đường đi của một bức thư từ MUA đến mailbox người nhận, các lệnh SMTP/POP3/IMAP, hàng đợi mail, relay và xác thực SASL.
+- **Chương 3a — Phần mềm phía server:** vai trò, file cấu hình, log và các tham số bảo mật quan trọng của vsftpd, OpenSSH, Postfix, Dovecot (kiến thức "đọc trước", không phải cấu hình hoàn chỉnh).
+- **Chương 3b — Client và công cụ giám sát:** FileZilla, Thunderbird, Wireshark, UFW, Fail2ban và hệ thống nhật ký — bộ đồ nghề quản trị hằng ngày.
+- **Chương 4a — Nguy cơ nhóm xác thực & FTP:** brute-force, PASS_THE_HASH/credential stuffing, FTP anonymous, directory traversal, SSH sai cấu hình — theo khung Nguyên nhân → Điều kiện → Dấu hiệu log → Ảnh hưởng → Phòng ngừa.
+- **Chương 4b — Nguy cơ nhóm email & TLS:** open relay, email spoofing, lạm dụng hàng đợi, flooding, TLS cấu hình sai/yếu, phần mềm EOL — cùng khung phân tích với log mẫu Postfix/Dovecot.
+- **Chương 5 — Phát hiện sớm qua log và metric:** biến dấu vết trong log thành cảnh báo có ngưỡng: đếm fail theo IP, velocity anomaly, baseline, queue depth, phát hiện thay đổi file hệ thống.
+- **Chương 6 — Phòng ngừa và gia cố:** tắt dịch vụ thừa, bắt buộc TLS/SFTP, key-based SSH, jail Fail2ban, SPF/DKIM/DMARC, chiến lược update và hardening theo nguyên lý tối thiểu hoá.
+- **Chương 7 — Thiết kế phòng lab & ba kịch bản demo:** mạng host-only cô lập, CA tự ký, và ba demo trọn vẹn (FTP plaintext vs SFTP, brute-force có kiểm soát, open relay rồi khắc phục) kèm chuẩn bị – thực hiện – bằng chứng – kiểm thử lại.
+- **Chương 8 — Chuẩn bị báo cáo:** bố cáo bố cục báo cáo học thuật, bảng tổng hợp, quy ước đặt tên/che thông tin khi chụp ảnh chứng minh, checklist tiêu chí demo thành công.
+- **Phụ lục A/B/F:** lộ trình học theo thứ tự, kế hoạch 7 ngày, phân biệt nội dung bắt buộc vs nâng cao.
+- **Phụ lục C/D/E:** bảng thuật ngữ, 20 câu tự kiểm tra kèm đáp án, danh mục RFC và tài liệu chính thức.
+
+## Mục lục
+
+1. [Kiến thức mạng nền tảng cần biết](#1-kiến-thức-mạng-nền-tảng-cần-biết)
+2. [Nguyên lý hoạt động: FTP, FTPS và SFTP](#2a-nguyên-lý-hoạt-động-ftp-ftps-và-sftp)
+3. [Nguyên lý hoạt động: SMTP, POP3, IMAP và luồng email](#2b-nguyên-lý-hoạt-động-smtp-pop3-imap-và-luồng-email)
+4. [Phần mềm triển khai trên Ubuntu Server: vsftpd, OpenSSH, Postfix, Dovecot](#3a-phần-mềm-triển-khai-trên-ubuntu-server-vsftpd-openssh-postfix-dovecot)
+5. [Công cụ phía client và giám sát: FileZilla, Thunderbird, Wireshark, UFW, Fail2ban, nhật ký hệ thống](#3b-công-cụ-phía-client-và-giám-sát-filezilla-thunderbird-wireshark-ufw-fail2ban-nhật-ký-hệ-thống)
+6. [Nguy cơ và lỗ hổng: nhóm xác thực, FTP và quyền file](#4a-nguy-cơ-và-lỗ-hổng-nhóm-xác-thực-ftp-và-quyền-file)
+7. [Nguy cơ và lỗ hổng: nhóm email, TLS và vòng đời phần mềm](#4b-nguy-cơ-và-lỗ-hổng-nhóm-email-tls-và-vòng-đời-phần-mềm)
+8. [Kỹ thuật phát hiện sớm qua log và metric](#5-kỹ-thuật-phát-hiện-sớm-qua-log-và-metric)
+9. [Biện pháp phòng ngừa và gia cố](#6-biện-pháp-phòng-ngừa-và-gia-cố)
+10. [Thiết kế phòng lab an toàn và ba kịch bản demo](#7-thiết-kế-phòng-lab-an-toàn-và-ba-kịch-bản-demo)
+11. [Chuẩn bị báo cáo và tiêu chí đánh giá](#8-chuẩn-bị-báo-cáo-và-tiêu-chí-đánh-giá)
+12. [Phụ lục A/B/F: Checklist học theo thứ tự, kế hoạch 7 ngày, phân biệt bắt buộc vs nâng cao](#phụ-lục-abf-checklist-học-theo-thứ-tự-kế-hoạch-7-ngày-phân-biệt-bắt-buộc-vs-nâng-cao)
+13. [Phụ lục C/D/E: Thuật ngữ, 20 câu tự kiểm tra, danh mục tài liệu chính thức](#phụ-lục-cde-thuật-ngữ-20-câu-tự-kiểm-tra-danh-mục-tài-liệu-chính-thức)
+
+## Ghi chú phiên bản
+
+- Phiên bản tài liệu: **1.0** — tổng hợp từ các chương thành phần (sec-01 đến sec-10), tháng **8/2026**.
+- Bối cảnh hệ thống tham chiếu: Ubuntu Server (LTS 26.04), vsftpd, OpenSSH, Postfix, Dovecot, UFW, Fail2ban; các RFC được dẫn đầy đủ ở Phụ lục E.
+- Bản chỉnh sửa từng chương vẫn được giữ riêng trong thư mục `sections/` để tiện cập nhật; tài liệu này là bản ghép liền mạch để đọc và nộp.
+
+---
+
+## 1. Kiến thức mạng nền tảng cần biết
+
+Chương này trang bị phần "nền móng" bắt buộc trước khi đi vào từng dịch vụ FTP, SFTP, SMTP, POP3, IMAP ở các chương sau. Mỗi khái niệm được trình bày theo ba mức: **bản chất** (vì sao nó tồn tại) → **ví dụ gắn với 5 dịch vụ của đồ án** → **cách quan sát trong lab** (mạng riêng do nhóm sở hữu, ví dụ VirtualBox/VMware với các máy Ubuntu Server). Mọi lệnh kiểm thử dưới đây chỉ dùng trong phạm vi lab nội bộ của nhóm.
+
+### 1.1. Mô hình TCP/IP bốn tầng và mô hình client–server
+
+**Bản chất.** Để các máy tính khác hệ điều hành nói chuyện được với nhau, người ta chia truyền thông thành các tầng (layer), mỗi tầng giải quyết một vấn đề và chỉ giao tiếp với tầng kề nó qua giao diện rõ ràng. Mô hình OSI 7 tầng là khung lý thuyết; trong thực triển khai, **mô hình TCP/IP 4 tầng** mới là mô hình "chạy" trên Internet ngày nay:
+
+| Tầng TCP/IP | Nhiệm vụ | Ví dụ giao thức/đối tượng | Dịch vụ đồ án nằm ở đâu |
+|---|---|---|---|
+| Application (Ứng dụng) | Ngôn ngữ trao đổi giữa hai tiến trình | FTP, SMTP, POP3, IMAP, SSH | **Cả 5 dịch vụ đều ở đây** |
+| Transport (Giao vận) | Truyền tin giữa 2 *socket*, tin cậy hay không | TCP, UDP | FTP/SFTP/SMTP/POP3/IMAP đều chạy trên TCP |
+| Internet (Mạng) | Định tuyến gói tin giữa 2 *máy* | IP, ICMP | Địa chỉ IP server/mail exchanger |
+| Network Access (Truy cập mạng) | Truyền trong một links mạng cụ thể | Ethernet, Wi-Fi, ARP | Card ảo VirtualBox (NAT/Bridged) |
+
+Khi một ứng dụng FTP gửi lệnh `RETR report.pdf`, dữ liệu được "bọc" (encapsulation) lần lượt qua các tầng: thêm header TCP (cổng, số thứ tự), thêm header IP (địa chỉ nguồn/đích), rồi thành khung Ethernet. Ở máy nhận, quá trình ngược lại diễn ra ("tách vỏ").
+
+**Mô hình client–server.** Cả 5 dịch vụ đều theo cấu trúc: một *server*listen trên một cổng cố định, chờ kết nối; một *client* chủ động kết nối tới. Client là phía "có nhu cầu" (người tải file, người gửi mail, hộp thư đọc thư), server là phía "cung cấp" (vsftpd, OpenSSH, Postfix, Dovecot). Điểm cần khắc ngay: **SMTP hơi đặc thù** vì nó là quan hệ server–server (MTA này gửi cho MTA kia) *và* client–server (Outlook/Thunderbird POST thư lên 587) lẫn lộn; POP3/IMAP thì thuần client-mail đọc thư.
+
+**Ví dụ.** vsftpd (FTP server) chạy trên máy Ubuntu `192.168.56.10`, listener của nó nằm ở tầng ứng dụng nhưng được OS quản lý qua socket TCP ở tầng giao vận. Client FileZilla trên máy Windows của bạn tạo kết nối tới cổng 21.
+
+**Cách quan sát trong lab.** Trên server:
+
+```bash
+ss -tlnp          # liệt kê socket đang LISTEN (-t TCP, -l listen, -n số thay vì tên, -p process)
+# Expected: :21 vsftpd, :22 sshd, :25 master(postfix), :143/:993 dovecot
+```
+
+Trong VirtualBox, chuyển card mạng sang **Bridged** để hai máy VM có IP thật trong cùng subnet — khi đó bạn đi hết 4 tầng của mô hình mà không bị ảo hóa "che" tầng Network Access.
+
+Nguồn:
+- Tổng quan mô hình tầng và TCP/IP: https://www.rfc-editor.org/info/rfc1122 và https://en.wikipedia.org/wiki/Internet_protocol_suite
+
+### 1.2. TCP vs UDP, địa chỉ IP, cổng, DNS và socket
+
+**TCP vs UDP — vì sao 5 giao thức này đều chọn TCP.**
+
+- **TCP (Transmission Control Protocol)** là kênh truyền có kết nối (connection-oriented), tin cậy: mọi byte được đánh số thứ tự (sequence number), bên nhận xác nhận (acknowledgement), mất gói thì truyền lại, có kiểm soát tắc nghẽn. Byte stream đến nơi đúng thứ tự, không thiếu, không trùng.
+- **UDP** thì nhanh, không kết nối, nhưng "gửi và cầu nguyện" — gói có thể mất, lặp, lộn xộn, và ứng dụng phải tự sửa lấy.
+
+FTP truyền file, SMTP mang thư, POP3/IMAP mang hộp thư, SSH/SFTP mang toàn bộ phiên làm việc — **mất một byte là hỏng một file hoặc một thông điệp**, và cả 5 giao thức này đều là giao thức "text command + response" kiểu hỏi–đáp tuần tự, vốn đòi hỏi luồng byte đáng tin. Đó là lý do cả 5 đều chạy trên TCP (định nghĩa chuẩn hiện hành: RFC 9293, thay thế RFC 793 cũ). UDP phù hợp hơn với DNS query hay VoIP — thứ chấp nhận mất gói để đổi lấy độ trễ.
+
+**Địa chỉ IP.** IP trả lời câu hỏi "gói này đi đến *máy nào* trên mạng". IPv4 gồm 4 octet (ví dụ `192.168.56.10`), không gian ~4,3 tỷ địa chỉ đã cạn nên tồn tại IPv6 (ví dụ `fe80::1`, RFC 8200). Trong lab bạn hầu hết dùng IPv4 riêng theo dải RFC 1918 (`10/8`, `172.16/12`, `192.168/16`).
+
+**Subnet mask** quy định phần nào của IP là "địa chỉ mạng", phần nào là "máy trong mạng đó": `/24` (255.255.255.0) nghĩa là 3 octet đầu định danh mạng, octet cuối định danh máy → `192.168.56.0/24` chứa 254 host. Hai máy cùng subnet thì nói chuyện trực tiếp ở tầng 2; khác subnet thì phải đẩy gói cho **gateway mặc định** (default gateway) — thường là router ảo của VirtualBox NAT (`192.168.56.1` nếu dùng host-only, hoặc `10.0.2.1` trong chế độ NAT).
+
+**Cổng (port).** IP định danh *máy*, còn port (số 16-bit, 0–65535) định danh *tiến trình* trên máy đó. IANA chia vùng port thành:
+
+- **Well-known ports 0–1023**: gắn với dịch vụ hệ thống — đây là "bản đồ" của đồ án:
+
+| Dịch vụ | Port chuẩn | Giao thức |
+|---|---|---|
+| FTP control | 21 | FTP (RFC 959) |
+| FTP data (active mode) | 20 | FTP |
+| FTPS (FTP + TLS) | 990 (implicit), 21 (explicit) | RFC 4217 |
+| SSH / SFTP | 22 | SSH (RFC 4251/4253/4254), SFTP chạy "trên" SSH |
+| SMTP | 25 | RFC 5321 |
+| SMTP submission | 587 | RFC 6409 |
+| SMTPS | 465 | (khôi phục làm cổng SMTP-over-TLS, xem RFC 8314) |
+| POP3 | 110 | RFC 1939 |
+| POP3S | 995 | RFC 2595 |
+| IMAP | 143 | RFC 9051 (IMAP4rev2) |
+| IMAPS | 993 | RFC 2595 |
+
+- **Registered ports 1024–49151**: do ứng dụng đăng ký dùng (ví dụ các port data ngẫu nhiên của FTP passive mode thường rơi vào dải cao do admin cấu hình, như `pasv_min_port/pasv_max_port` trong vsftpd).
+
+Trên Linux, tiến trình muốn bind vào port < 1024 cần quyền root (hoặc capability `CAP_NET_BIND_SERVICE`) — chi tiết này giải thích vì sao vsftpd/postfix/dovecot đều chạy daemon với quyền root rồi "hạ quyền" (drop privileges) xuống user riêng như `nobody`, `_postfix`, `dovenull`.
+
+**DNS và quá trình phân giải tên.** Người nhớ `mail.example.com`, máy nhớ IP. **DNS (Domain Name System, RFC 1034/1035)** là cơ sở dữ liệu phân cấp dịch tên → IP. Quá trình khi Postfix cần gửi thư cho `nhungthanhdat.edu.vn`:
+
+1. Client hỏi resolver (thư mục `/etc/resolv.conf` chỉ DNS của bạn, vd `1.1.1.1`).
+2. Recursive resolver hỏi root → TLD (`.vn`) → nameserver của domain.
+3. Nhận về bản ghi **A/AAAA** (IP) — hoặc **MX** (mail exchanger) nếu hỏi loại MX: MX trỏ tên máy chủ nhận mail cho domain kèm độ ưu tiên, ví dụ `mx1.example.com. preference 10`.
+4. Kết quả được cache theo TTL để lần sau trả ngay.
+
+**hostname vs domain vs FQDN.** `mail01` là **hostname** (tên máy); `example.com` là **domain** (vùng quản lý); `mail01.example.com` là **FQDN** (Full Qualified Domain Name — tên định danh đầy đủ, tra DNS là ra IP duy nhất). Trong lab, đặt hostname thật chuẩn (`hostnamectl set-hostname ftp01.lab.local`) rồi khai báo trong `/etc/hosts` — nhiều dịch vụ mail/tls từ chối chạy hoặc log lỗi lằng nhằng nếu FQDN không phân giải được hai chiều (forward + reverse).
+
+**Socket = (IP, port, giao thức).** **Socket** là "đầu nối" mà OS cấp cho một ứng dụng, được nhận diện bằng bộ ba (địa chỉ IP, cổng, TCP/UDP). Một kết nối TCP là một **cặp socket**: `(client_ip:client_port, server_ip:server_port)` — chính vì thế một server FTP phục vụ 50 client cùng lúc vẫn phân biệt được từng client dù tất cả đều vào port 21: chúng khác nhau ở IP/port nguồn.
+
+**Cách quan sát trong lab.**
+
+```bash
+dig mx example.com          # tra bản ghi MX (cài package dnsutils/bind9-dnsutils)
+getent hosts mail01.lab.local  # resolver dùng NSS, đọc /etc/hosts + DNS
+ss -tn state established     # xem các socket TCP đang ESTABLISHED (kết nối thật)
+tcpdump -i any -nn port 21   # bắt gói tin ở tầng mạng để "thấy" socket vận hành
+```
+
+Nguồn:
+- TCP (STD 7, RFC 9293): https://www.rfc-editor.org/info/rfc9293/
+- FTP (RFC 959): https://www.rfc-editor.org/info/rfc959/ — FTPS: https://www.rfc-editor.org/info/rfc4217/
+- SMTP: https://www.rfc-editor.org/info/rfc5321/ — Submission: https://www.rfc-editor.org/info/rfc6409/
+- POP3: https://www.rfc-editor.org/info/rfc1939/ — IMAP4rev2 (RFC 9051): https://www.rfc-editor.org/info/rfc9051/
+- DNS: https://www.rfc-editor.org/info/rfc1035/
+- Bảng cổng IANA: https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xhtml
+
+### 1.3. Bắt tay ba bước (three-way handshake) và kết thúc kết nối TCP
+
+**Bản chất.** Vì TCP là "có kết nối", hai bên phải thống nhất tham số trước khi truyền dữ liệu: mỗi bên báo cho bên kia **ISN (Initial Sequence Number)** — số thứ tự khởi điểm — và khả năng nhận bao nhiêu byte chưa xác nhận (**window**). Việc trao đổi này gọi là **bắt tay ba bước (three-way handshake)**: SYN → SYN/ACK → ACK.
+
+**Ví dụ với client kết nối vào port 21 (FTP):**
+
+```
+Client (192.168.56.1:52344)                 Server vsftpd (192.168.56.10:21)
+        |  [SYN] seq=x, win=64240              |
+        |------------------------------------->|   client chọn ISN=x, gửi SYN
+        |                                      |   server cấp socket (client_ip,client_port,21)
+        |  [SYN, ACK] seq=y, ack=x+1           |
+        |<-------------------------------------|   server chọn ISN=y, xác nhận đã nhận x
+        |  [ACK] seq=x+1, ack=y+1              |
+        |------------------------------------->|   phiên TCP ESTABLISHED
+        |<====== 220 (vsFTPd 3.0.5) ===========|   lúc này FTP mới bắt đầu "nói"
+```
+
+Ký hiệu: `seq` là số thứ tự byte tiếp theo bên gửi sẽ gửi; `ack = n` nghĩa "ta đã nhận đủ tới byte n−1, mong byte n". SYN và FIN mỗi loại **đốt 1 số thứ tự** dù không mang dữ liệu — nên `ack = x+1`. Điểm mấu chốt: server không thể gửi dòng chào `220` trước khi handshake xong → mọi nội dung ứng dụng đều nằm "bên trong" một kết nối đã xác lập.
+
+**Trạng thái kết nối (state machine).** Hai phía đi qua các trạng thái: `CLOSED → LISTEN (server) → SYN_SENT/SYN_RCVD → ESTABLISHED → (truyền dữ liệu: các gói PSH, ACK qua lại)`. Server FTP sau khi fork tiến trình phục vụ sẽ trở lại LISTEN chờ client mới.
+
+**Kết thúc phiên (teardown).** Khi client gõ `QUIT` hoặc trình mail đóng cửa sổ:
+
+```
+[FIN] → [ACK] → [FIN] → [ACK]
+```
+
+Bên gửi FIN nói "ta hết dữ liệu", bên kia ACK; rồi phía kia cũng FIN/ACK — tổng 4 gói. Trạng thái trung gian `FIN_WAIT_1/2`, `TIME_WAIT` (bên chủ động đóng chờ 2×MSL để gói muộn không lạc sang phiên sau), `CLOSE_WAIT` (nếu app quên close → socket "rò rỉ", một dạng lỗi quản lý tài nguyên hay gặp khi viết tool quét dịch vụ).
+
+**Ý nghĩa bảo mật (sẽ dùng lại ở chương sau).** Vì server "tin" một gói vào port 21/25/143... chỉ khi nó thuộc kết nối ESTABLISHED, attacker phải hoàn tất handshake (hoặc spoof qua được state table của firewall) → đây là nền tảng của firewall stateful (mục 1.4) và của tấn công SYN flood (làm cạn bộ nhớ hàng đợi `SYN_RCVD` — có thể quan sát `ss -s` trong lab khi chạy công cụ stress *chỉ trên mạng riêng*).
+
+**Cách quan sát trong lab.**
+
+```bash
+sudo tcpdump -i any -nn 'tcp port 21 and (tcp[tcpflags] & (tcp-syn|tcp-fin) != 0)'
+# Chỉ in các gói SYN/FIN tới port 21 → đếm được số handshake/teardown
+ss -tan state established '( dport = :21 )'   # các phiên FTP đang mở
+nmap -sS 192.168.56.10                          # (lab) quét bán kết nối: gửi SYN, nhận SYN/ACK rồi gửi RUT (RST) để không hoàn tất handshake — cách hiểu vì sao SYN_RCVD tồn tại
+```
+
+Wireshark với filter `tcp.flags.syn==1` cho biểu đồ trực quan nhất cho người mới.
+
+Nguồn:
+- RFC 9293, mục Segment Lifecycle / Events (ba bước và 4 gói FIN): https://www.rfc-editor.org/rfc/rfc9293.html
+- Wireshark (bắt gói, trực quan hóa handshake): https://www.wireshark.org/docs/
+
+### 1.4. Firewall stateful, NAT (SNAT/DNAT) và port forwarding
+
+**Firewall packet-filter stateful.** Firewall đời cũ chỉ đọc header từng gói độc lập (stateless: "cho vào port 21? OK/CHẶN"). Firewall **stateful** (Linux: netfilter/nftables, mặt tiền dễ dùng: `ufw`/`firewalld`) giữ **bảng kết nối (connection tracking, conntrack)**: nếu gói ra ngoài được phép, thì **các gói vào thuộc cùng kết nối đã ESTABLISHED được tự động cho về** mà không cần mở "cửa chiều vào" cho mọi port đã lắng nghe. Nguyên tắc cấu hình: chỉ **chủ động mở inbound** cho các dịch vụ cần publish (21, 22, 25, 143, ...); còn lại để stateful lo chiều "trả lời".
+
+**NAT và hai chiều của nó.** IPv4 cạn → **NAT (Network Address Translation)** cho nhiều máy dùng IP riêng ra Internet bằng 1 IP công cộng:
+
+- **SNAT (Source NAT) / MASQUERADE**: đổi *nguồn* khi máy trong lab đi ra (`192.168.56.10:33456 → 203.0.113.5:12000`). Máy trong VirtualBox NAT mode tự làm việc này.
+- **DNAT (Destination NAT) = port forwarding**: đổi *đích* — người ngoài gõ `203.0.113.5:2222` được "dẫn" vào `192.168.56.10:22`. Đây chính là cách bạn publish SSH/SFTP server trong lab lên Internet (khai trong router/`VirtualBox NAT Port Forwarding`/`iptables -t nat`).
+
+**Hệ quả thực tế #1 — FTP active mode "gãy" sau NAT/firewall.** FTP có 2 kênh: điều khiển (control, port 21) và dữ liệu (data) riêng. **Active mode**: client mở cổng `1024+n` rồi *báo cho server* trong lệnh PORT `("ta ở 192.168.56.1:4012, kết nối vào đó")`; server từ port 20 **chủ động connects ngược** vào client. Nếu client đứng sau NAT/firewall stateful: gói SYN từ server không khớp kết nối nào client đã *gửi ra* → bị chặn; tệ hơn, client báo IP riêng nội bộ nên server... không định tuyến được. Đó là lý do **passive mode (PASV)** ra đời: client gửi `PASV`, server trả một cổng cao do chính server mở, rồi *client chủ động kết nối đến* — hợp với stateful firewall chiều đi. Nhưng PASV lại cần *server* cho mở inbound dải cổng cao (vd `pasv_min_port=40000, pasv_max_port=40100` — mỗi tham số phải phản chiếu vào firewall và vào rule DNAT!), và nếu server sau NAT thì IP trong response PASV là IP nội bộ — vsftpd giải quyết bằng `pasv_address=<IP_công_cộng>`. Tóm lại: **hầu hết sự cố "FTP login được nhưng không list được folder" trong lab là bài toán firewall/NAT + mode, không phải hỏng FTP**.
+
+**Hệ quả thực tế #2 — máy chủ trong lab ảo hóa.** Ở chế độ VirtualBox NAT mặc định, host là "router": SSH từ host vào VM phải cấu hình port forwarding (`ssh -p 2222 kimdv@127.0.0.1`); nếu chọn Bridged, VM nhận IP thật cùng dải mạng vật lý → mọi chuyện đơn giản hơn, phù hợp lab nhiều dịch vụ. Khi publish 25/143/995/993 qua DNAT, nhớ **stateful sẽ không tự cho inbound kết nối do server chủ động tạo** (trường hợp FTP active, hay Postfix gọi về máy phân giải blacklist qua cổng cao) — phải có module helper (nf_conntrack_ftp) hoặc mở rule rõ ràng.
+
+**Cách quan sát trong lab.**
+
+```bash
+sudo iptables -L -n -v                 # rule filter hiện hành
+sudo conntrack -L -p tcp --dport 21    # xem bảng stateful: kết nối FTP đang "được theo dõi"
+sudo iptables -t nat -L -n -v          # nhìn SNAT/DNAT
+# Test: đổi VM từ Bridged sang NAT → FTP active mode_fail_ ở LIST, PASV_ vẫn chạy
+```
+
+Nguồn:
+- vsftpd + firewall/NAT (pasv_address, dải cổng): https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/9/html/monitoring_and_managing_system_status_and_performance/index — bài FTP qua firewall: xem thêm mục FTP trong tài liệu vsftpd trên https://access.redhat.com/ và https://wiki.archlinux.org/title/Vsftpd
+- nftables/conntrack: https://netfilter.org/documentation/ và https://manksmesser.eu/~manoj/conntrack-tools/
+
+### 1.5. Mật mã học nền tảng: đối xứng, bất đối xứng, hash, MAC, chữ ký số, TLS và SSH
+
+**Mã hóa đối xứng (AES).** Một khóa bí mật chung dùng cho cả encrypt lẫn decrypt — nhanh, hợp lượng dữ liệu lớn (file FTP, nội dung mail, toàn bộ kênh SSH). Chuẩn hiện hành: **AES (FIPS 197)**, các mode an toàn như AES-GCM (vừa encrypt vừa xác thực). Vấn đề cố hữu: *làm sao hai bên có chung khóa mà không gặp nhau?*
+
+**Mã hóa bất đối xứng (RSA/ECDSA).** Một cặp khóa: **public key** công khai, **private key** giữ kín; dữ liệu mã hóa bằng khóa này chỉ giải được bằng khóa kia. Chậm hơn nhiều nên chỉ dùng để **trao khóa / ký**, không mã hóa cả file. RSA (RFC 8017) và **ECDSA** (nhỏ hơn, nhanh hơn — dạng khóa `ecdsa-sha2-nistp256` bạn gặp trong SSH) là hai họ phổ biến.
+
+**Hash vs MAC vs chữ ký số.** Ba công cụ "kiểm tra tính toàn vẹn" nhưng khác bản chất:
+
+| Công cụ | Khóa? | Bảo vệ chống ai? | Dùng ở đâu trong đồ án |
+|---|---|---|---|
+| Hash (SHA-256, FIPS 180-4) | Không | Sửa đổi tình cờ/có chủ đích khi *khóa nằm cùng dữ liệu* | fingerprint cert, checksum file, lưu mật khẩu (salted hash) |
+| MAC / HMAC (RFC 2104) | Khóa đối xứng chung | Người không có khóa giả mạo tag | tính toàn vẹn từng bản ghi TLS/SSH |
+| Chữ ký số | Private key ký, public key verify | Chính cả *người giữ public key* (không thể giả chữ ký) — kèm **không thể phủ nhận** (non-repudiation) | chứng thư số TLS, `authorized_keys` + khóa SSH, DKIM mail |
+
+Hash chỉ đảm bảo "không ai đổi file nếu họ không lấy được file+bản hash". Muốn *ai đó trên đường truyền* không giả được "báo cáo toàn vẹn", cần MAC (khóa chung) hoặc chữ ký (khóa công khai).
+
+**Chứng thư số X.509, CA, chuỗi tin cậy.** Làm sao biết `pubkey` của `mail.example.com` là thật mà không phải của attacker đứng giữa? **Chứng thư số (X.509, RFC 5280)** = hồ sơ `⟨tên subject, public key, hạn dùng, ...⟩ được **CA (Certificate Authority)** ký chữ ký số. Client tin CA (danh sách gốc trong `ca-certificates` / Firefox store) → verify chữ ký trên cert → tin public key. Chuỗi cert server gửi thường gồm: leaf → intermediate → (root đã có sẵn) — **chain of trust**. Trong lab, cert **self-signed** (tự ký) hoặc cấp bởi **internal CA** của nhóm (openssl/mkcert): về toán học hợp lệ, nhưng trình mail/FTP sẽ cảnh báo "không rõ ai ký" — đúng hành vi mong đợi; trong lab thì import root CA tự tạo vào máy client để hết cảnh báo, tuyệt đối không tắt hẳn kiểm tra chứng thư rồi "quen tay" ngoài prod. Cert Let's Encrypt (ACME) cũng dùng được nếu máy trong lab có HTTPS out.
+
+**TLS 1.2/1.3.** **TLS (Transport Layer Security)** là giao dịch "bọc" một kênh TCP thô thành kênh mã hóa+authenticating. Bắt tay TLS tóm tắt: ClientHello (liệt kê **cipher suite** — tổ hợp `[key exchange] + [chữ ký] + [AES-GCM/ChaCha20] + [HMAC]` mà client hỗ trợ) → ServerHello + cert chuỗi + key share → hai bên dựng **khóa đối xứng phiên (session keys)** qua trao đổi khóa (ECDHE), từ đó chỉ AES mã dữ liệu — kết hợp thế mạnh cả hai mục trên. TLS 1.3 (RFC 8446, 2018) rút gọn còn 1 RTT, bỏ các thuật toán cũ dễ sai; TLS 1.2 (RFC 5246) vẫn dùng được nhưng phải cấu hình cipher cẩn thận. **SSL 2.0/3.0 đã bị deprecated** (lần lượt theo RFC 6176 và RFC 7568) vì lỗi thiết kế (POODLE, BEAST...); **TLS 1.0/1.1 cũng bị RFC 8996 (2021) tuyên bố ngừng dùng** — nên trong cấu hình vsftpd/postfix/dovecot hiện đại bạn đặt tối thiểu TLS 1.2, tốt nhất 1.3.
+
+**SSH khác TLS ở đâu.** SSH (Secure Shell, RFC 4251/4253/4254) cũng giải bài toán "kênh an toàn" nhưng theo mô hình riêng:
+
+- **Đa kênh/kênh con (channels)**: một kết nối TCP:22 duy nhất *multiplex* nhiều "channel" — shell, forward, và các **subsystem** như `sftp` hay `scp`. FTP/FTPS cần 2–3 kênh TCP thì SFTP chỉ dùng đúng một → không đau khổ với firewall/NAT như FTP active (lý do thực tiễn lớn nhất chọn SFTP).
+- **Key-based auth**: server lưu **public key** của user trong `~/.ssh/authorized_keys`, client chứng minh sở hữu private key bằng chữ ký số (thay vì gửi mật khẩu). Host cũng có key (`/etc/ssh/ssh_host_*_key`) để client biết "đúng server" — lần đầu bạn nhận fingerprint "The authenticity of host..." chính là mô hình **TOFU (Trust On First Use)**, khác TLS dựa CA.
+- **Tunnel/port forwarding** (`ssh -L/-R`) — vì mọi thứ chạy trong một kênh mã hóa sẵn có, SSH dễ làm "đường hầm" cho dịch vụ khác (che port SMTP/IMAP chưa có TLS bằng SSH tunnel khi thử nghiệm).
+
+**Cách quan sát trong lab.**
+
+```bash
+openssl s_client -connect 192.168.56.10:993 -servername imap01.lab.local
+# xem negotiated protocol + cipher; thêm -tls1_1 sẽ FAIL nếu server đã chặn (đúng chính sách)
+doveconf -a | grep -i 'ssl_protocols'   # tham số TLS thật của dovecot
+ssh-keygen -t ed25519                   # tạo cặp khóa client cho SFTP key-based (lab)
+```
+
+Nguồn:
+- TLS 1.3 RFC 8446: https://www.rfc-editor.org/info/rfc8446/ ; ngừng SSL/TLS 1.0/1.1: https://www.rfc-editor.org/info/rfc8996/ và https://www.rfc-editor.org/info/rfc7568/
+- X.509/PKI: https://www.rfc-editor.org/info/rfc5280/
+- SSH: https://www.rfc-editor.org/info/rfc4251/ và https://www.rfc-editor.org/info/rfc4254/ ; OpenSSH portable: https://www.openssh.com/portable.html
+- AES FIPS 197 / SHA FIPS 180-4: https://csrc.nist.gov/pubs/fips/197/final , https://csrc.nist.gov/pubs/fips/180-4/final
+- RFC 959 (FTP), RFC 4217 (FTP), TLS trong các dịch vụ: https://www.rfc-editor.org/info/rfc4217/
+
+### 1.6. AAA — Authentication, Authorization, Accounting; đặc quyền tối thiểu và defense in depth
+
+**Bản chất.** Trước mọi cổng dịch vụ luôn là câu hỏi 3A:
+
+- **Authentication (xác thực) — "bạn là ai?"**: chứng minh danh tính. FTP: username+password qua kênh control (bất lợi nếu dùng FTP trần — mật khẩu bay plaintext, mục 1.5 chính là liều thuốc); SFTP: key hoặc password; SMTP submission: SASL (Postfix hỏi Dovecot); POP3/IMAP: user mail + mật khẩu/PAM.
+- **Authorization (phân quyền) — "bạn được làm gì?"**: user `ftp` vsftpd chỉ vào được `ftp_root`, `chroot_local_user=YES` nhốt trong home; quyền read-only cho anon; mailbox của A thì B không được `SELECT` dù đã login IMAP thành công (Dovecot enforce qua `mail_location` + OS perms).
+- **Accounting (ghi nhận) — "bạn đã làm gì?"**: nhật ký phiên/hành động — log FTP `200 ... OK: bytes`, Postfix ghi queue ID mỗi message (dùng để truy vết mail, mục 1.7), auth log ghi `Accepted publickey for kimdv`.
+
+**Least privilege (đặc quyền tối thiểu).** Mỗi tiến trình/user chỉ giữ đúng quyền cần cho nhiệm vụ, không hơn. Trong 5 dịch vụ: daemon rootbind cổng thấp rồi **drop privileges** (vsftpd chạy `nobody`; Postfix fork các `nqmgr/smtp/cleanup` chạy user `_postfix`; Dovecot tách `auth` quyền cao khỏi `imap/lmtp` quyền thấp); user FTP không có shell (`/usr/sbin/nologin`); thư mục upload `chmod o+w` là *phải có*, đừng `777` "cho nhanh".
+
+**Defense in depth (phòng thủ nhiều lớp).** Không lớp nào "tin" lớp nào: TLS mã hóa kênh (lớp 1) nhưng vẫn cần auth (2), chroot (3), firewall hạn chế inbound tới dải lab (4), fail2ban phản ứng khi thấy brute-force trong auth log (5), và audit log (6) — nếu attacker vượt 5 lớp, lớp 6 vẫn phát hiện. Chương 7-8 của tài liệu sẽ lần lượt đo từng lớp bằng chính các công cụ này.
+
+**Cách quan sát trong lab.**
+
+```bash
+ps -o user,pid,cmd -C vsftpd -C postfix -C dovecot   # thấy ngay quá trình hạ quyền (vd nobody, _postfix)
+id ftp ; getfacl /srv/ftp/upload                      # kiểm tra quyền user dịch vụ
+grep -E 'Accept|Auth' /var/log/auth.log | tail        # lớp Accounting: ai login, lúc nào
+```
+
+Nguồn:
+- least privilege + dịch vụ mail: https://documentation.ubuntu.com/postfix/ và https://www.postfix.org/README.html (mục privilege separation)
+- privilege separation trong Dovecot: https://doc.dovecot.org/
+- NIST SP 800-53 (kiểm soát AC — Access Control, AU — Audit), nền của AAA: https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final
+
+### 1.7. Log hệ thống: syslog/rsyslog, journald và chỉ số phát hiện bất thường
+
+**Bản chất.** Log là nguyên liệu thô của mọi hệ thống phát hiện sớm. Linux gom log theo hai dòng song song:
+
+- **syslog/rsyslog** (giao thức syslog RFC 5424; rsyslog là daemon mặc định trên Ubuntu/Debian từ lâu): các daemon ghi vào socket `/dev/log`, rsyslog phân loại bằng **facility + severity** rồi chuyển tới file. Facility quan trọng cho đồ án: `mail` (Postfix), `auth/authpriv` (PAM/sshd/Dovecot auth), `daemon`/`ftp` (vsftpd nếu bật `xferlog_enable`). Ubuntu mặc định: `/var/log/mail.log` (mọi thứ mail), `/var/log/auth.log` (xác thực), `/var/log/syslog` (tổng hợp).
+- **journald** (systemd): log có cấu trúc nhị phân, query bằng `journalctl`, hữu ích khi dịch vụ chạy qua systemd unit — `journalctl -u dovecot -f` theo dõi trực tiếp.
+
+**Bốn loại log cần phân biệt** (ánh xạ vào 5 dịch vụ):
+
+| Loại | Nội dung | Ví dụ dòng log thật (dạng chuẩn, rút gọn) |
+|---|---|---|
+| Kết nối | ai IP nào vào port nào | vsftpd: `CONNECT: Client "192.168.56.1"`; postfix: `connect from unknown[192.168.56.1]` |
+| Xác thực | login đúng/sai | `sshd[123]: Failed password for invalid user admin from 192.168.56.1 port 52222 ssh2`; dovecot: `auth: Info: passwd-file(user,...): failed` ; vsftpd: `FAIL LOGIN: Client "192.168.56.1", "user", (tên/sai)` |
+| Thao tác | việc làm sau khi vào | vsftpd `OK UPLOAD: "192.168.56.1" "a.pdf" 2034 bytes`; dovecot: `User logged in/out, Command SELECT INBOX` |
+| Giao dịch mail | toàn bộ lifecycle message | postfix: `queue id A1B2C3... message-id=..., from=<>, to=<>, status=sent` (mỗi message một queue ID để lần theo qua mọi log khác) |
+
+Lưu ý cấu hình: với vsftpd, log upload nằm ở `vsftpd.log`/`/var/log/xferlog` **chỉ khi** bật `xlog_enable`, `log_ftp_protocol=YES`; SMTPS/IMAPS khi bật full logging sẽ rất "nặng" → cân nhắc chọn lọc (đây là trade-off thật của admin).
+
+**Chỉ số phát hiện bất thường (anomaly indicators).** Chỉ log thô chưa đủ; người quản trị tính các chỉ số trên nền log:
+
+1. **Tần suất thất bại (failure rate)**: số `Failed password`/`FAIL LOGIN` từ cùng một IP trong 5/10 phút — tín hiệu kinh điển của brute-force (chính xác là logic mà fail2ban triển khai: đọc log, đếm regex trùng pattern, vượt `maxretry` thì chèn rule chặn).
+2. **Entropy thời gian đăng nhập**: tài liệu legit thường đăng nhập giờ hành chính theo cluster; một account IMAP login rải rác đều khắp 24/7 (entropy cao bất thường) hoặc đăng nhập lúc 3 giờ sáng từ múi giờ lạ → cờ đỏ. Đo đơn giản bằng histogram theo giờ trong ngày trên `grep "Accepted"`/`grep logged in`.
+3. **Volume (khối lượng)**: kilobytes/UPLOAD của một user FTP, số message một user submission gửi/giờ so với **baseline** của chính họ. SMTP volume đột biến từ một mailbox vừa đổi mật khẩu = dấu hiệu tài khoản bị chiếm để phát spam; POP3/IMAP volume đột biến từ IP lạ = mail box bị kéo toàn bộ (data exfiltration).
+4. **Địa lý/thành phần**: số IP nguồn / số user trên mỗi nguồn ("1 IP thử 40 user" rất khác "40 IP cho 1 user" — credential stuffing).
+
+Tất cả phép thử này trong tài liệu chỉ chạy **trên hạ tầng riêng của nhóm**: dựng lab, tự brute-force *lab của mình* bằng công cụ tồn tại cho mục đích đó (hydra, medusa... — chỉ để tạo mẫu log, không đưa cú pháp), rồi đo xem các chỉ số trên phát hiện ra mẫu thế nào — đó là chủ đề các chương sau.
+
+**Cách quan sát trong lab.**
+
+```bash
+sudo tail -f /var/log/mail.log /var/log/auth.log /var/log/vsftpd.log
+journalctl -u postfix -u dovecot -u vsftpd --since "1 hour ago" -o short-iso
+grep -c "Failed password" /var/log/auth.log      # seed cho chỉ số tần suất
+awk '/FAIL LOGIN/ {print $NF}' /var/log/vsftpd.log | sort | uniq -c | sort -rn | head
+# ^ "top offenders" thủ công — phiên bản nhỏ của fail2ban (github.com/fail2ban/fail2ban)
+```
+
+Nguồn:
+- RFC 5424 (syslog): https://www.rfc-editor.org/info/rfc5424/
+- rsyslog: https://www.rsyslog.com/doc/ ; journald: https://docs.kernel.org/admin-guide/sysfs-bus-platform.html#systemd — thực tế dùng `man systemd.journal-fields` và https://documentation.ubuntu.com
+- Pattern brute-force / jail mẫu (sshd, postfix, dovecot, vsftpd): https://github.com/fail2ban/fail2ban/tree/master/config/jail.d và https://manpages.ubuntu.com/manpages/noble/en/man5/jail.conf.5.html
+- Postfix log format (truy vết queue ID): https://www.postfix.org/logfile.5.html
+- Dovecot logging: https://doc.dovecot.org/configuration/core_settings/logging/
+
+### 1.8. Kết chương
+
+Bức nền của chương: (1) năm dịch vụ của đồ án đều là **tầng ứng dụng chạy trên TCP** với mô hình client–server; (2) mọi vấn đề "không vào được dịch vụ" hầu như quy về **socket + route + stateful firewall/NAT** — FTP active/passive là phép thử tổng hợp của cả ba; (3) mọi vấn đề "dịch vụ có an toàn không" quy về **TLS/SSH + AAA + nguyên tắc đặc quyền tối thiểu**; (4) sau cùng, muốn *biết* điều gì đang xảy ra thì cần **log đúng chỗ và chỉ số đúng cách**. Các chương 2–5 sẽ cài đặt và cấu hình cụ thể (vsftpd/FTPS, OpenSSH-SFTP, Postfix, Dovecot POP3/IMAP) — mỗi lần đụng cấu hình, hãy quay lại bảng port ở mục 1.2 và ví dụ handshake ở 1.3 để định vị mình đang ở tầng nào.
+
+---
+
+*Tài liệu tham khảo toàn chương — đã đối chiếu ngày 29/08/2026:*
+
+- RFC 9293 — Transmission Control Protocol (STD 7): https://www.rfc-editor.org/info/rfc9293/
+- RFC 959 — File Transfer Protocol (STD 9): https://www.rfc-editor.org/info/rfc959/
+- RFC 4217 — Securing FTP with TLS: https://www.rfc-editor.org/info/rfc4217/
+- RFC 5321 — SMTP: https://www.rfc-editor.org/info/rfc5321/ ; RFC 6409 — Message Submission: https://www.rfc-editor.org/info/rfc6409/
+- RFC 1939 — POP3: https://www.rfc-editor.org/info/rfc1939/ ; RFC 9051 — IMAP4rev2: https://www.rfc-editor.org/info/rfc9051/
+- RFC 4251/4253/4254 — SSH Architecture/Transport/Connection: https://www.rfc-editor.org/info/rfc4251/
+- SFTP: chưa là RFC chính thức; chuẩn de facto là draft-ietf-secsh-filexfer (v3), dự thảo mới draft-spaghetti-sshm-filexfer qua nhóm SSHM: https://datatracker.ietf.org/doc/draft-ietf-secsh-filexfer/
+- RFC 8446 — TLS 1.3: https://www.rfc-editor.org/info/rfc8446/ ; RFC 8996 — Deprecating TLS 1.0/1.1: https://www.rfc-editor.org/info/rfc8996/ ; RFC 7568 — Deprecating SSL 3.0: https://www.rfc-editor.org/info/rfc7568/
+- RFC 5280 — X.509 PKI Certificate: https://www.rfc-editor.org/info/rfc5280/ ; RFC 2104 — HMAC: https://www.rfc-editor.org/info/rfc2104/
+- RFC 1034/1035 — DNS: https://www.rfc-editor.org/info/rfc1035/ ; RFC 5424 — syslog: https://www.rfc-editor.org/info/rfc5424/
+- NIST: FIPS 197 (AES) https://csrc.nist.gov/pubs/fips/197/final , FIPS 180-4 (SHA) https://csrc.nist.gov/pubs/fips/180-4/final , SP 800-53 Rev.5 (AC/AU controls) https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final
+- IANA Port Registry: https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xhtml
+- Ubuntu 26.04 LTS "Resolute Raccoon" (LTS hiện hành, phát hành 23/04/2026; 24.04 LTS vẫn được hỗ trợ): https://documentation.ubuntu.com/release-notes/26.04/
+- Documentation các dịch vụ: https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/9/html/deploying_different_types_of_servers/configuring-ftp ; https://www.postfix.org/docs.html ; https://doc.dovecot.org/ ; https://www.openssh.com/manual.html ; https://github.com/fail2ban/fail2ban
+- Wireshark user guide: https://www.wireshark.org/docs/wsug_html_chunked/
+
+---
+
+## 2a. Nguyên lý hoạt động: FTP, FTPS và SFTP
+
+Chương này trình bày cách thức hoạt động "bên trong" của ba giao thức chuyển tệp phổ biến: **FTP** (File Transfer Protocol), **FTPS** (FTP over TLS) và **SFTP** (SSH File Transfer Protocol). Ba cái tên dễ gây nhầm lẫn — đặc biệt là "SFTP" *không phải* "FTP cộng thêm mã hoá" — nên phần đầu chương tập trung vào kiến trúc kênh, phiên lệnh và quá trình bắt tay (handshake) của từng giao thức; các phần cài đặt, quản trị chi tiết (vsftpd, OpenSSH...) thuộc chương sau.
+
+Mọi quan sát paket, log và phiên mẫu trong chương này được thực hiện trong **lab mạng riêng do nhóm sở hữu** (máy client và máy server đặt trong cùng dải mạng ảo hoá), phục vụ mục đích học tập và phòng thủ.
+
+### 2a.1 FTP: mục đích ra đời và mô hình client–server
+
+FTP được định nghĩa trong **RFC 959 — File Transfer Protocol (October 1993)**, thuộc họ chuẩn STD 9 của IETF. Cần nhấn mạnh bối cảnh lịch sử: FTP không sinh ra năm 1993 mà có nguồn gốc từ các RFC đầu thập niên 1970; phiên bản RFC 959 chỉ là bản chuẩn hoá cuối cùng của một thiết kế **tiền-web (pre-web)** — thời mà mạng chỉ gồm các máy UNIX kết nối trực tiếp, tin cậy lẫn nhau, chưa có khái niệm "đường truyền không an toàn". Hệ quả trực tiếp của thiết kế này:
+
+- **Chuẩn gốc hoàn toàn không có cơ chế mã hoá (encryption), xác thực mạnh hay toàn vẹn dữ liệu.** Mật khẩu đi trên mạng dưới dạng văn bản thuần (plaintext).
+- Giao thức **kênh điều khiển (control channel) là văn bản ASCII**, mỗi lệnh là một dòng kết thúc bằng CRLF — đọc được ngay bằng mắt thường khi bắt gói.
+- Thông điệp trả lời (reply) là **mã số 3 chữ số** kèm thông báo dạng người đọc.
+
+Mô hình hoạt động là **client–server**: server FTP (daemon, ví dụ `vsftpd`, `ProFTPD`, `FileZilla Server`) lắng nghe ở cổng TCP 21; client kết nối tới, gửi lệnh, nhận hồi đáp, yêu cầu mở thêm kênh dữ liệu khi cần chuyển tệp. Một chi tiết kiến trúc quan trọng: FTP là giao thức "đảo ngược" — chính **server dùng cổng nguồn cố định 20 để chủ động kết nối lại phía client** trong chế độ active (xem 2a.4), điều gây ra hàng loạt vấn đề với NAT/firewall hiện đại.
+
+Nguồn:
+- RFC 959: https://www.rfc-editor.org/info/rfc959/
+- STD 9 (FTP): https://www.rfc-editor.org/info/std9/
+
+### 2a.2 Kiến trúc hai kênh, tập lệnh và mã hồi đáp
+
+#### Hai kênh kết nối song song
+
+FTP là giao thức **duy nhất trong nhóm khảo sát dùng hai kênh TCP riêng biệt** cho một phiên:
+
+| Kênh | Cổng | Nội dung |
+|---|---|---|
+| Kênh điều khiển (control connection) | TCP **21** | Lệnh ASCII từ client, hồi đáp số từ server — kể cả tên đăng nhập/mật khẩu |
+| Kênh dữ liệu (data connection) | TCP **20** (active) hoặc **cổng động** (passive) | Nội dung tệp, kết quả `LIST`, chuỗi chấp nhận tệp |
+
+Mỗi khi cần truyền dữ liệu (danh sách thư mục, tải lên/xuống tệp), hai bên thương lượng một kênh dữ liệu *mới*, dùng xong thì đóng. Vì vậy trên Wireshark một phiên FTP hiện ra thành nhiều TCP stream — đây là dấu hiệu nhận biết đầu tiên khi phân tích log mạng trong lab.
+
+#### Các lệnh FTP quan trọng
+
+| Lệnh | Ý nghĩa | Reply thành công điển hình |
+|---|---|---|
+| `USER <tên>` | Bắt đầu định danh | `331` (cần mật khẩu) |
+| `PASS <mật khẩu>` | Gửi mật khẩu — **plaintext** | `230` |
+| `SYST` | Hỏi loại hệ điều hành server | `215 UNIX Type: L8` |
+| `PWD` | In thư mục làm việc hiện hành | `257 "/"` |
+| `CWD <dir>` | Đổi thư mục (change working dir) | `250` |
+| `PASV` | Yêu cầu server mở kênh dữ liệu thụ động | `227 Entering Passive Mode (…)` |
+| `PORT h1,h2,h3,h4,p1,p2` | Báo IP:cổng client để server gọi lại (active) | `200` |
+| `LIST` | Liệt kê thư mục → qua **kênh dữ liệu** | `150` … `226` |
+| `RETR <tệp>` | Tải xuống (retrieve) | `150` … `226 Transfer complete.` |
+| `STOR <tệp>` | Tải lên (store) | `150` … `226` |
+| `DELE <tệp>` | Xoá tệp | `250` |
+| `QUIT` | Kết thúc phiên | `221 Goodbye.` |
+
+#### Mã hồi đáp 3 chữ số
+
+Chữ số đầu tiên quy định *loại* hồi đáp (theo RFC 959, trang "Reply Codes"):
+
+- **1xx** — preliminary positive: chuẩn bị, ví dụ `150 File status okay; about to open data connection.`
+- **2xx** — completion: thành công, ví dụ `200`, `226`, `230`, `250`, `257`.
+- **3xx** — positive intermediate: chấp nhận một phần, chờ bước tiếp, ví dụ `331 User name okay, need password.`
+- **4xx** — transient negative: thất bại tạm thời (dịch vụ chưa sẵn sàng lúc này, thử lại có thể được), ví dụ `421`, `425`.
+- **5xx** — permanent negative: thất bại dứt khoát (sai cú pháp/không được phép), ví dụ `530 Not logged in`, `550 Failed to open file.`
+
+#### Phiên FTP mẫu (ghi trong lab, client nối về vsftpd trên Ubuntu)
+
+```text
+S: 220 (vsFTPd 3.0.5)
+C: USER labuser
+S: 331 Please specify the password.
+C: PASS LabPass2026          <-- mật khẩu đi rõ văn bản trên kênh 21
+S: 230 Login successful.
+C: SYST
+S: 215 UNIX Type: L8
+C: PWD
+S: 257 "/"
+C: CWD upload
+S: 250 Directory successfully changed.
+C: PASV
+S: 227 Entering Passive Mode (192,168,10,20,195,132).
+   # IP 192.168.10.20, cổng dữ liệu = 195*256 + 132 = 50052
+C: LIST
+S: 150 Here comes the directory listing.
+S: 226 Directory send OK.
+C: RETR report.txt
+S: 150 Opening BINARY mode data connection for report.txt
+S: 226 Transfer complete.
+C: STOR note.txt
+S: 150 Opening BINARY mode data connection for note.txt
+S: 226 Transfer complete.
+C: DELE old.txt
+S: 250 File deleted successfully.
+C: QUIT
+S: 221 Goodbye.
+```
+
+**Quan sát trong lab:** bật Wireshark (filter `ftp`) trên máy chạy song song hoặc mirror cổng, toàn bộ transcript trên hiện nguyên văn — kể cả dòng `PASS`. Đây là bằng chứng trực quan nhất cho mục 2a.3 và 2a.8.
+
+Nguồn:
+- RFC 959 (danh sách lệnh, reply codes): https://www.rfc-editor.org/rfc/rfc959
+- Wireshark FTP chapter: https://wiki.wireshark.org/FTP
+
+### 2a.3 Xác thực FTP: plaintext và anonymous login
+
+FTP chuẩn chỉ có đúng một cơ chế định danh: cặp `USER`/`PASS` gửi **dưới dạng văn bản thuần trên kênh điều khiển**. Không có salt, không có challenge–response, không có ràng buộc phiên — nghĩa là:
+
+- Bất kỳ ai đứng giữa đường truyền (mirror port, ARP spoof trong cùng LAN lab) bắt được gói là có ngay credentials hợp lệ dùng mãi mãi.
+- Server không biết "ai" đang gõ lệnh cho tới khi nhận dòng `PASS`; vì vậy **log FTP chỉ ghi được tên tài khoản, không phản ánh thiết bị** — điểm yếu bị lợi dụng trong brute-force (chương sau sẽ nói về fail2ban với filter `vsftpd`).
+
+**Anonymous login** là cơ chế được RFC 1635 ("How to Use Anonymous FTP", 1994) và thực tiễn Internet quy ước: client đăng nhập bằng tài khoản `anonymous` (một số server nhận cả `ftp`), mật khẩu *theo lịch sự* là một địa chỉ email (ví dụ `ftp@example.com`) nhưng server thường **không kiểm tra giá trị này**. Chế độ này từng dùng để công bố tệp công khai (mirror phần mềm, tài liệu) mà không muốn cấp tài khoản riêng. Ngày nay nó gần như không còn lý do chính đáng (HTTPS/SFTP web mirror đã thay thế) và kéo theo rủi ro lớn:
+
+- Người lạ đọc được toàn bộ cây thư mục công khai → **rò rỉ dữ liệu ngoài ý muốn** (cấu hình, backup đặt nhầm chỗ).
+- Nếu server bật `write_enable` cho anonymous → trở thành **nơi phát tán malware, chứa nội dung vi phạm, hoặc bị làm đầy đĩa** (từ chối dịch vụ bằng hết dung lượng).
+- Anonymous không có audit trail thực sự — mọi hành vi đều quy về một tài khoản.
+
+vsftpd có khoá riêng `anonymous_enable=YES/NO` — lưu ý hai điểm hay gây nhầm lẫn: (1) gói quy định server là `vsftpd`, không phải `ftp` (package `ftp` chỉ là client dòng lệnh); (2) tệp cấu hình đóng gói sẵn `/etc/vsftpd.conf` trên Ubuntu từ trước đến nay bật `anonymous_enable=YES` kèm chú thích "allowed by default if you comment this out" — nghĩa là **chỉ comment dòng này ra KHÔNG tắt được anonymous** (mặc định compiled-in của vsftpd là YES; một số bản Debian/RHEL đóng gói `NO`). Quản trị viên phải đặt tường minh `anonymous_enable=NO` nếu không dùng; phần cấu hình chi tiết thuộc chương quản trị.
+
+Nguồn:
+- RFC 1635: https://www.rfc-editor.org/rfc/rfc1635
+- vsftpd man page: https://manpages.ubuntu.com/manpages/noble/man5/vsftpd.conf.5.html
+- Red Hat — FTP/FTPS with vsftpd guide: https://docs.redhat.com/documentation/en-us/red_hat_enterprise_linux/9/html-single/deploying_network_services/index
+
+### 2a.4 FTP Active vs Passive: hai chiều mở kênh dữ liệu
+
+Vấn đề của FTP nằm ở kênh dữ liệu: *ai là bên khởi tạo (SYN) kết nối TCP thứ hai?*
+
+#### Active mode (PORT) — server gọi lại client
+
+Client ra lệnh `PORT` kèm IP + cổng tạm của chính nó, rồi **server chủ động kết nối từ cổng 20 của server tới cổng đó**:
+
+```text
+Client                                    Server
+   |  ---- TCP SYN (control) :5xxxx -> :21 ---->  |
+   |  <== 220/230 ... (điều khiển) ==============>  |
+   |  ---- PORT 192,168,10,5,200,17 ------------>  |  "hãy gọi tôi ở 192.168.10.5:51217"
+   |  ---- LIST -------------------------------->  |
+   |  <==== TCP SYN :20 -> 192.168.10.5:51217 ===  |  <-- SERVER kết nối CHỦ ĐỘNG vào client
+   |  ====== dữ liệu (danh sách/tệp) ============>  |   (chiều ngược chiều điều khiển)
+   |  <== 226 Transfer complete ================>  |
+```
+
+**Vì sao active hỏng sau NAT/firewall của client:** NAT private chỉ cho phép inbound kết nối *được ánh xạ trước* bởi một outbound gần đó; gói SYN từ server (cổng 20) nhắm vào cổng tạm của client bị NAT/firewall chặn vì không có "cuộc hẹn" nào trong bảng mapping — và tệ hơn, IP client gửi trong lệnh `PORT` là **IP riêng** (192.168.x.x) mà server không định tuyến được. Triệu chứng kinh điển: login OK, `LIST` treo rồi timeout `425 Can't open data connection` (vsftpd in mã 425 với chuỗi "Failed to establish connection."). Đây là lý do mọi client FTP hiện đại **mặc định dùng passive**.
+
+#### Passive mode (PASV) — client gọi cả hai kênh
+
+Client gửi `PASV`; server *lắng nghe* một cổng động, trả về trong reply `227` dạng tuple `(h1,h2,h3,h4,p1,p2)` với `port = p1*256 + p2` (trong phiên mẫu ở 2a.2 là 50052). Sau đó client mở kết nối dữ liệu *đi vào* server:
+
+```text
+Client                                    Server
+   |  ---- control =============================>  :21
+   |  ---- PASV -------------------------------->  |
+   |  <== 227 (192,168,10,20,195,132) =========  |  "tôi nghe ở :50052"
+   |  ---- TCP SYN -> :50052 (client chủ động) ->  |
+   |  <===== dữ liệu ==========================   |
+   |  <== 226 =================================  |
+```
+
+**Cái giá của passive:** tường lửa *phía server* phải cho vào **một dải cổng động** chứ không riêng 20/21. vsftpd quản lý dải này bằng hai tham số trong `/etc/vsftpd.conf`:
+
+```ini
+pasv_enable=YES          # bật chế độ passive (client hiện đại cần)
+pasv_min_port=50000      # cổng động thấp nhất — thu hẹp dải để siết firewall
+pasv_max_port=50100      # cao nhất; mở đúng dải này trên firewall: INPUT tcp 50000:50100
+pasv_address=203.0.113.10 # IP công khai ghi trong reply 227 khi server sau NAT
+```
+
+Nếu `pasv_address` không được đặt khi server đứng sau NAT, reply `227` trả về IP nội bộ → client không kết nối được kênh dữ liệu — lỗi cấu hình kinh điển khi dựng lab có port-forward.
+
+**Quan sát trong lab:** chạy `tcpdump -i any -nn 'port 21 or portrange 50000-50100'` trên server; passive mode sẽ thấy SYN **từ client** tới dải cổng cao, còn active mode thấy SYN **từ server:.20** — hai fingerprint firewall-log hoàn toàn khác nhau.
+
+Nguồn:
+- RFC 959 (PORT/PASV): https://www.rfc-editor.org/rfc/rfc959
+- RFC 1579 — "Firewall-Friendly FTP" (1994, giải thích vì sao client đứng sau firewall nên ưu tiên PASV): https://www.rfc-editor.org/rfc/rfc1579
+- Red Hat vsftpd guide (pasv_min_port/pasv_max_port): https://docs.redhat.com/documentation/en-us/red_hat_enterprise_linux/9/html/deploying_network_services/setting-up-an-ftp-server_deploying-network-services
+
+### 2a.5 FTPS: "FTP over TLS" — explicit và implicit
+
+FTPS giữ nguyên **toàn bộ giao thức FTP (hai kênh, lệnh, reply code)** và bọc kênh điều khiển (tuỳ chọn cả kênh dữ liệu) trong TLS. Có hai biến thể dễ nhầm:
+
+- **Explicit FTPS (FTPES)** — chuẩn hoá trong **RFC 4217 "Securing FTP with TLS" (October 2005)**, obsoleted RFC 2228. Client kết nối **bình thường vào port 21** bằng plaintext, rồi ra lệnh nâng cấp:
+  ```text
+  C: AUTH TLS          # "từ giờ từ đây kênh điều khiển là TLS"
+  S: 234 Authentication command accepted.
+  === TLS handshake (ClientHello ... Finished) ===
+  C: PBSZ 0            # protection buffer size = 0 (bắt buộc trước PROT)
+  S: 200 PBSZ=0
+  C: PROT P            # bảo vệ LUÔN dữ liệu trên kênh dữ liệu (P), mặc định là C=clear
+  S: 200 Protection level set to Private
+  ```
+  Vì phiên *bắt đầu plaintext rồi mới mã hoá*, explicit cho phép nhiều virtual host dùng chung port 21 — nhưng cũng có nghĩa nếu không enforce, phiên có thể chạy trót lọt ở chế độ không mã hoá.
+- **Implicit FTPS** — mã hoá **ngay từ byte đầu tiên** trên cổng dành riêng **TCP 990** (đăng ký IANA, service-name `ftps`). Cơ chế này ra đời *trước* RFC 4217 như một thoả thuận de facto, bị coi là **deprecated** so với explicit nhưng vẫn phổ biến. Vì handshake TLS diễn ra trước khi có bất kỳ lệnh FTP nào, implicit không thể dùng chung port với FTP thường.
+
+Điểm yếu cố hữu còn lại của cả hai biến thể: **kênh dữ liệu vẫn là các TCP kết nối riêng**, phải tự lo bảo vệ bằng `PROT P`, và bài toán dải cổng passive vẫn nguyên — firewall phức tạp hơn SFTP một bậc.
+
+Trong lab: `openssl s_client -connect <ip-server>:990` sẽ thấy bắt tay TLS mà không cần câu lệnh ứng dụng nào (implicit); với explicit trên port 21, Wireshark giải được toàn bộ lệnh cho tới `AUTH TLS` rồi chuyển sang dạng TLS encrypted.
+
+Nguồn:
+- RFC 4217: https://www.rfc-editor.org/info/rfc4217/ (obsolete RFC 2228: https://www.rfc-editor.org/rfc/rfc2228)
+- Wikipedia FTPS (tổng quan implicit/explicit, cổng 990): https://en.wikipedia.org/wiki/FTPS
+
+### 2a.6 SFTP: SSH File Transfer Protocol — không phải "FTP + TLS"
+
+**SFTP về bản chất là một giao thức hoàn toàn khác**, chỉ tình cờ trùng họ tên: nó là **SSH File Transfer Protocol**, chạy như một **subsystem** (chương trình con) trên nền kênh đã mã hoá của SSH phiên bản 2, qua **TCP port 22** — cùng kết nối, cùng hàng rào mã hoá với lệnh đăng nhập SSH. Tên đăng nhập/mật khẩu để mở kênh con này do chính SSH xác thực (password, khoá công khai, keyboard-interactive...).
+
+**Trạng thái chuẩn hoá (đã xác minh 8/2026):** SFTP **chưa bao giờ là một RFC**. Chuẩn bị viết trong các Internet-Draft của IETF qua hai thế hệ làm việc — nhóm `secsh` cũ với `draft-ietf-secsh-filexfer-*` (bản -02 khai sinh protocol **version 3**, được cài đặt rộng nhất; bản -13 cuối cùng năm 2005 đã "no longer active"), sau đó được nhóm **SSHM (Secure Shell Maintenance)** nối lại qua draft cá nhân `draft-spaghetti-sshm-filexfer-00` (07/2025, hết hạn 01/2026). Tính đến tháng 8/2026 **vẫn chưa có RFC cho SFTP**; SSHM WG tiếp tục thảo luận tại IETF 124 (11/2025) và IETF 126 (07/2026). Tài liệu tham chiếu *de facto* thực tế là man page OpenSSH (`sftp(1)`, `sftp-server(8)`) — vì OpenSSH chính là implementation chi phối thị trường.
+
+**Giao thức là binary request/response, không phải văn bản ASCII.** Client và server trao đổi các gói theo kiểu SSH channel:
+
+| Gói | Hướng | Vai trò |
+|---|---|---|
+| `INIT` / `VERSION` | C→S / S→C | Bắt tay chọn phiên bản giao thức (thường v3) |
+| `OPEN` / `CLOSE` | C→S | Mở/đóng tệp hoặc thư mục (kèm cờ READ/WRITE/CREATE...) |
+| `READ` / `WRITE` | C→S | Đọc/ghi theo offset — **không cần kênh thứ hai** |
+| `STATUS` / `HANDLE` / `DATA` / `NAME` / `ATTRS` | S→C | Hồi đáp kiểu SSH_FXP_* (mã 101–105) |
+| `STAT` / `LSTAT` / `FSTAT` | C→S | Lấy metadata tệp |
+| `OPENDIR` / `READDIR` | C→S | Liệt kê thư mục |
+| `REMOVE` / `RENAME` / `MKDIR` / `RMDIR` / `REALPATH` | C→S | Thao tác quản lý |
+
+Vì mọi thứ — *cả "lệnh" lẫn dữ liệu* — chảy trong một kênh SSH đã mã hoá nên **không có khái niệm active/passive, không có cổng dữ liệu động, firewall chỉ thấy port 22**, và người sniff không đọc được gì ngoài dữ liệu mã hoá. SFTP cũng có các lợi ích kiến trúc FTP không có: resume theo offset chính xác, thao tác đồng thời nhiều tệp trên một kết nối, và khi cần chỉ một TCP connection cho cả phiên.
+
+**Quan sát trong lab:**
+
+```bash
+sftp -vvv labuser@192.168.10.20
+# debug client in ra vòng đời gói thật, ví dụ:
+# debug2: channel 0: open confirm rwindow 0 rmax 32768
+# request #3: open "report.txt" 1        (SSH_FXP_OPEN)
+# incoming packet: type 102             (SSH_FXP_HANDLE)
+# request #4: read 32768 bytes           (SSH_FXP_READ)
+```
+
+Ở phía server, daemon `sftp-server` (log qua `Subsystem sftp ... -l INFO` trong `sshd_config`) ghi từng thao tác open/read/write vào syslog — nguồn log giám sát chính của SFTP, khác hẳn log `xferlog` của vsftpd.
+
+Nguồn:
+- draft-ietf-secsh-filexfer-13 (lịch sử): https://datatracker.ietf.org/doc/draft-ietf-secsh-filexfer/
+- draft-spaghetti-sshm-filexfer-00 / hoạt động SSHM WG: https://datatracker.ietf.org/doc/draft-spaghetti-sshm-filexfer/ và https://datatracker.ietf.org/group/sshm/
+- OpenSSH portable man pages: https://www.openssh.com/portable.html ; `sftp-server(8)`: https://man.openbsd.org/sftp-server.8
+- RFC 4253 (SSH transport layer): https://www.rfc-editor.org/info/rfc4253/
+
+### 2a.7 Bảng so sánh tổng hợp FTP vs FTPS vs SFTP
+
+| Tiêu chí | FTP | FTPS (explicit/implicit) | SFTP |
+|---|---|---|---|
+| Cổng | 21 (+20/động) | 21 (explicit) / 990 (implicit) (+ dải động) | 22 (chung với SSH) |
+| Số kênh TCP | 2 (control + data), data mở lại mỗi lần truyền | 2 — như FTP, thêm thương lượng TLS cho từng kênh | **1** — tất cả qua SSH channel |
+| Cái gì được mã hoá | **Không gì cả** | Control luôn (sau AUTH TLS); data *chỉ khi* `PROT P` | **Tất cả**: lệnh, dữ liệu, tên tệp, mật khẩu |
+| Xác thực | USER/PASS plaintext (+PAM phía sau) | SSH/PAM + có thể kèm TLS client cert | SSH: password, **khoá công khai**, certificate |
+| Firewall-friendliness | Active **rất kém** (server gọi vào client); passive cần dải cổng | Kém như FTP: vẫn cần dải passive ports | **Tốt** — mở đúng 1 cổng 22 |
+| Giao diện giao thức | ASCII command + reply 3 số | Như FTP, bọc TLS | **Binary** INIT/OPEN/READ/WRITE/STATUS |
+| Nền tảng chuẩn hoá | RFC 959 (1993) | RFC 4217 (2005) | Chưa có RFC; draft IETF + OpenSSH de facto |
+| Hiệu năng | Cao nhất trên mạng hợp nhất (không TLS CPU) | Tốt; thêm chi phí TLS handshake mỗi kênh | Tốt; slightly slower do một pipe + CPU mã hoá; với AES-NI hiện nay khác biệt thường không đáng kể |
+| Trường hợp dùng phù hợp | Chỉ lab cô lập / legacy device không TLS | App cũ buộc FTP semantics + cần TLS; công bố tệp lớn | **Khuyến nghị chung** cho MFT, automation, chuyển tệp qua WAN |
+
+### 2a.8 Dữ liệu có được mã hóa mặc định không?
+
+Câu trả lời thẳng cho từng giao thức:
+
+- **FTP: KHÔNG.** Mọi thứ — credentials, tên tệp, nội dung tệp — đi plaintext. Không có biến thể "đã bật mã hoá"; nếu thấy "encrypted FTP" thì đó thực chất là FTPS hoặc SFTP. FTP chỉ chấp nhận được trong đoạn mạng cô lập có chủ đích và có giám sát.
+- **FTPS: MẶC ĐỊNH CHƯA ĐỦ.** Explicit (RFC 4217) *cho phép* mã hoá nhưng không *buộc*: client có thể không gửi `AUTH TLS` và server nếu cấu hình lỏng vẫn phục vụ plaintext; kênh dữ liệu mặc định là clear cho tới khi có `PROT P`. Muốn "mã hoá mặc định thật sự" phải enforce ở server (vsftpd: `ssl_enable=YES` + `allow_anon_ssl=NO` + `force_local_data_ssl=YES` + `force_local_logins_ssl=YES`). Implicit trên 990 mã hoá từ byte đầu nên an toàn hơn theo bản chất, nhưng là cơ chế cũ/deprecated.
+- **SFTP: CÓ, tuyệt đối.** Không tồn tại đường "chạy không mã hoá" — SFTP được sinh ra là subsystem của SSH đã hoàn tất key exchange; nếu SSH handshake chưa xong thì không có phiên SFTP. (Cấu hình có thể chọn *thuật toán yếu*, nhưng "plaintext" thì không.)
+
+**Tóm tắt nguyên lý của chương:** FTP thiết kế 1971–1993 cho một Internet tin cậy nên dùng hai kênh plaintext; FTPS "vá" TLS vào đúng kiến trúc hai kênh đó; SFTP bỏ hẳn mô hình FTP và đặt thao tác tệp vào trong một kênh SSH đã mã hoá. Hiểu được *vị trí kênh và cái gì đi trên từng kênh* là chìa khoá cho cả phần nguy cơ tấn công (chương 3) lẫn phần phát hiện xâm nhập qua log/paket (chương 4) của tài liệu.
+
+Nguồn:
+- vsftpd.conf man page (ssl_enable, force_local_data_ssl): https://manpages.ubuntu.com/manpages/noble/man5/vsftpd.conf.5.html
+- RFC 4217 §4 (AUTH TLS, PBSZ, PROT): https://www.rfc-editor.org/rfc/rfc4217
+
+---
+
+## 2b. Nguyên lý hoạt động: SMTP, POP3, IMAP và luồng email
+
+Chương này trình bày "bản chất" của ba giao thức email mà đồ án quản trị: **SMTP** (Simple Mail Transfer Protocol) dùng để **gửi và chuyển tiếp thư**, **POP3** (Post Office Protocol v3) và **IMAP** (Internet Message Access Protocol) dùng để **đọc/lấy thư**. Mỗi giao thức được phân tích theo ba tầng: cơ chế hoạt động → ví dụ phiên giao dịch thật → cách quan sát trong lab (dùng `telnet`/`nc`/`openssl s_client` trên mạng riêng do nhóm sở hữu). Toàn bộ kiểm thử chỉ thực hiện trong phạm vi lab nội bộ, không tấn công hệ thống công cộng.
+
+### 2b.1 Kiến trúc tổng thể: ai nói chuyện với ai
+
+Một email không đi "thẳng" từ máy người gửi sang máy người nhận như cuộc gọi điện thoại. Nó đi qua một dây chuyền các thành phần, mỗi thành phần nói một giao thức:
+
+```
+ [An]                                                     [Bình]
+  │ Thunderbird (MUA)          Server lab mail.lab.local   │ Thunderbird (MUA = MRA client)
+  │   │ gửi (submission)          ┌────────────────┐       │   │ đọc
+  ▼   ▼                           │                │       ▼   ▼
+ MUA ──► MSA ──► MTA ──► (internet/├─ port 25 ─►  MTA ─► MDA ─► mailbox ─◄ MRA ◄── MUA
+             (587/465)  relay 25   │  (Postfix)   │  (Postfix/local│ (INBOX/    (Dovecot
+                                   │              │   hoặc Dovecot)│  Maildir)  POP3/IMAP)
+                                   └────────────────┘
+```
+
+- **MUA (Mail User Agent)**: ứng dụng phía người dùng — Thunderbird, Outlook. Người dùng *tưởng* là mình "gửi email trực tiếp cho Bình", thực chất chỉ đưa thư cho MSA của mình.
+- **MSA (Mail Submission Agent)**: cổng tiếp nhận thư từ MUA, lắng nghe port **587/465**, **bắt buộc xác thực** (SMTP AUTH). Trong thực tế MSA và MTA thường chạy chung một tiến trình Postfix nhưng cấu hình listener riêng.
+- **MTA (Mail Transfer Agent)**: "bưu cục trung chuyển" — Postfix, Exim, Sendmail. Nhận thư từ MSA hoặc từ MTA khác qua port **25**, tra DNS MX (Mail Exchanger) record để tìm MTA đích, chuyển tiếp (relay) hoặc bàn giao tại chỗ (delivery).
+- **MDA (Mail Delivery Agent)**: lấy thư ra khỏi hàng đợi và ghi vào hộp thư của người nhận — `postfix/local`, Dovecot LDA, hoặc ghi trực tiếp dưới định dạng Maildir/Mbox.
+- **Mailbox**: nơi lưu thư, thường là định dạng **Maildir** (một thư mục, mỗi thư một file) hoặc **mbox** (một file lớn) — Dovecot đọc trực tiếp các file này.
+- **MRA (Mail Retrieval/Access Agent)**: phục vụ client đọc thư — Dovecot cung cấp POP3/IMAP.
+
+**Điểm cốt lõi cần phân biệt**: *gửi* (submission + relay) luôn là SMTP; *nhận/đọc* (client lấy thư từ server của chính mình) là POP3 hoặc IMAP. Bình không bao giờ "nhận SMTP" trực tiếp từ An — trừ khi Bình tự vận hành MTA riêng và domain của Bình trỏ MX thẳng vào máy đó — mà đọc qua IMAP/POP3 từ mailbox của mình trên server.
+
+**Quan sát trong lab**: trên Ubuntu Server 26.04 LTS (phát hành 4/2026, hỗ trợ đến 5/2031), bộ đôi phổ biến là `apt install postfix dovecot-imapd` — Postfix series 3.10 và Dovecot 2.4 trong repo `main` mặc định. Kiểm tra tiến trình nào giữ vai trò nào: `ss -tlnp | grep -E ':(25|143|465|587|993|995)[[:space:]]'`.
+
+Nguồn:
+- https://ubuntu.com/server/docs/how-to/mail-services/install-postfix/
+- https://www.postfix.org/README.html
+- https://doc.dovecot.org/
+
+### 2b.2 SMTP: phiên lệnh, mã reply, relay và hàng đợi (RFC 5321)
+
+SMTP (RFC 5321, kế thừa RFC 821) là giao thức **text-based, hướng kết nối, request-response**: server trả lời bằng mã 3 chữ số, client ra lệnh bằng dòng ASCII.
+
+#### Phiên giao dịch mẫu đầy đủ (có chú thích)
+
+Lab: `openssl s_client -connect mail.lab.local:587 -starttls smtp` để thấy cả phiên plaintext trước khi bật TLS.
+
+```text
+S: 220 mail.lab.local ESMTP Postfix (Ubuntu)   <- server chào, 2xx = sẵn sàng
+C: EHLO laptop.an.lab                          <- EHLO (extended) thay cho HELO cũ; khai báo tên client
+S: 250-mail.lab.local                          <- 250 = OK; gạch nối '-' nghĩa là còn dòng tiếp
+S: 250-AUTH PLAIN LOGIN                        <- server liệt kê các extension nó hỗ trợ
+S: 250-STARTTLS
+S: 250 8BITMIME                                <- dòng cuối cùng dùng khoảng trắng '250 '
+C: AUTH PLAIN AGFuAG1hdGtoYXVnaWEA           <- đăng nhập (xem 2b.4): base64 của \0an\0matkhaugia (RFC 4616)
+S: 235 2.7.0 Authentication successful         <- 235 = xác thực thành công
+C: MAIL FROM:<an@lab.local>                    <- envelope sender (dùng cho bounce/Return-Path); RFC 5321: MAIL FROM phải đi TRƯỚC RCPT TO
+S: 250 2.1.0 Ok
+C: RCPT TO:<binh@lab.local>                    <- envelope recipient; có thể lặp lại nhiều lần (một thư, nhiều người)
+S: 250 2.1.5 Ok
+C: DATA                                        <- báo "tôi sắp gửi nội dung"
+S: 354 End data with <CR><LF>.<CR><LF>         <- 3xx = trung gian, chờ dữ liệu
+C: Date: Sat, 29 Aug 2026 09:00:00 +0700       <- từ đây là nội dung message (RFC 5322 headers + body)
+C: From: An <an@lab.local>                     <- header hiển thị, khác envelope ở trên!
+C: Subject: Hop lab
+C:
+C: Xin chao Binh.
+C: .                                           <- dòng chứa DẤU CHÂM đơn độc kết thúc DATA
+S: 250 2.0.0 Ok: queued as 3A2B1C4D            <- "queued as" = đã vào mail queue, mã queue để tra mail.log
+C: QUIT
+S: 221 2.0.0 Bye
+```
+
+#### Bảng mã reply (RFC 5321 §4.2)
+
+| Chữ số đầu | Ý nghĩa | Ví dụ thường gặp trong lab |
+|---|---|---|
+| 2xx | Hoàn thành (positive completion) | `250` Ok, `235` auth OK, `221` Bye |
+| 3xx | Trung gian, chờ thêm (positive intermediate) | `354` gửi dữ liệu đi, `334` server chờ response của AUTH |
+| 4xx | Thất bại **tạm thời** (transient) → MTA sẽ **thử lại** | `451` lỗi tạm thời, `452` hết chỗ |
+| 5xx | Thất bại **vĩnh viễn** (permanent) → bounce thư về | `550` mailbox không tồn tại/relay denied, `554` giao dịch thất bại |
+
+Mã 3 chữ số còn kèm **enhanced status code** dạng `X.Y.Z` (RFC 3463), ví dụ `5.7.1` nghĩa là "từ chối vì chính sách an toàn" — đọc mã này là cách nhanh nhất biết vì sao một thư bị chặn.
+
+**252 vs 550 5.7.1/554 5.7.1 — hai thái độ với relay**: `252` nghĩa là "tôi không xác minh được hộp thư này nhưng tôi **nhận** thư và sẽ tự thử chuyển tiếp" (hay gặp với lệnh VRFY, hoặc một số MTA nhận thư cho domain lạ rồi mới phát hiện không chuyển được → bounce sau). Ngược lại, `550/554 5.7.1 Relay access denied` (thông điệp kinh điển của Postfix `554 5.7.1 <x@domain.net>: Relay access denied`) nghĩa là **từ chối ngay từ RCPT TO** vì bạn không có quyền dùng server làm relay. Kiểm thử trong lab: gửi `RCPT TO:<nguoi@yahoo.com>` tới Postfix cấu hình `mynetworks=127.0.0.0/8` khi chưa AUTH → nhận 554; chạy tiếp `AUTH` đúng rồi thử lại → 250. Đây chính là bằng chứng "open relay" hình thành như thế nào.
+
+#### Relay, mail queue và cơ chế retry/backoff
+
+- **Relaying** = hành động một MTA chuyển thư mà nó nhận **cho một domain khác** mà nó không phục vụ. MTA công cộng phải giới hạn relay (chỉ cho `mynetworks` nội bộ hoặc client đã AUTH), nếu không sẽ thành **open relay** — đích yêu thích của spammer.
+- Sau `250 queued as`, thư nằm trong **mail queue** (`/var/spool/postfix/active`, `deferred`): Postfix chưa chắc kết nối được MTA đích ngay (bạn nhận offline, mạng gián đoạn).
+- **Retry với exponential backoff**: MTA liên tục thử lại trong khoảng thời gian cấu hình (Postfix mặc định giữ thư deferred khoảng 5 ngày, `maximal_queue_lifetime`), mỗi lần thất bại kéo dài dần khoảng chờ. Thử quá hạn → trả bounce 5xx về envelope sender.
+- **Quan sát trong lab**: `postqueue -p` (hoặc `mailq`) xem queue; `postcat -q 3A2B1C4D` mổ một bức thư trong queue (thấy cả envelope + header); tắt mạng MTA "đích" giả lập rồi gửi thư, xem `/var/log/mail.log` in dòng `status=deferred` rồi `status=sent` khi mạng hồi — hai trạng thái kinh điển của queue.
+
+#### Envelope vs header From: — gốc rễ của phishing
+
+SMTP chỉ vận chuyển theo **envelope** (phong bì): `MAIL FROM` = người gửi trả bounce (Return-Path), `RCPT TO` = người nhận mà MTA căn cứ để chuyển thư. Bên trong envelope là **message** theo RFC 5322, chứa các header như `From:`, `To:`, `Subject:` — những thứ này **chỉ để hiển thị** trong MUA, MTA trung gian không cần quan tâm tới tính đúng đắn của chúng.
+
+Hệ quả: kẻ tấn công có thể đặt `MAIL FROM:<spam@example.com>` (thậm chí để trống `<>` như bounce) nhưng ghi header `From: nganhang@nganhang-that.example` — Bình đọc Thunderbird chỉ thấy header. Đó là bản chất spoofing trong phishing. Các cơ chế **SPF** (kiểm tra domain của *envelope* MAIL FROM có cho phép IP gửi này không — chính vì vậy SPF đọc `MAIL FROM`, không đọc header `From:`), DKIM (chữ ký số trên message) và DMARC ra đời để vá khoảng hở này; chúng sẽ được phân tích ở chương nguy cơ/phòng ngừa.
+
+**Quan sát trong lab**: tự gửi một thư bằng `nc` tới MSA lab (AUTH bằng tài khoản lab của mình trước, rồi mới `MAIL FROM`), đặt `MAIL FROM:<a@lab.local>` nhưng header `From: <b@lab.local>` — Thunderbird của Bình hiển thị "b@lab.local", còn `mail.log` và `Return-Path` nói lên a@lab.local. Kiểm chứng bằng View source / Analyze message trong Thunderbird.
+
+#### MIME: vì sao gửi được file đính kèm (RFC 2045)
+
+SMTP cổ điển chỉ an toàn với ASCII 7-bit và dấu chấm đơn độc. MIME (Multipurpose Internet Mail Extensions, bộ RFC 2045–2049) mở rộng bằng cách thêm header: `MIME-Version: 1.0`, `Content-Type`, `Content-Transfer-Encoding`. Một thư có file đính kèm là `multipart/mixed`, mỗi phần một `Content-Type: application/pdf` với body mã hóa **base64** (tăng ~33% dung lượng). `Content-Disposition: attachment; filename="..."` quy định cách MUA hiển thị. Lưu ý MIME **không** mã hóa bảo mật — base64 chỉ là encoding, giải mã được ngay, không phải encryption; đây là lý do chương phòng ngừa phải bàn tới S/MIME hoặc PGP khi cần bảo mật nội dung.
+
+Nguồn:
+- https://www.rfc-editor.org/rfc/rfc5321.html (SMTP)
+- https://www.rfc-editor.org/rfc/rfc5322.html (format message/header)
+- https://www.rfc-editor.org/rfc/rfc2045.html (MIME)
+- https://www.postfix.org/QSHAPE_README.html và https://www.postfix.org/postqueue.1.html (queue)
+- https://datatracker.ietf.org/doc/html/rfc7208 (SPF — envelope sender)
+
+### 2b.3 Ba cổng SMTP: 25, 587, 465 và bài toán TLS
+
+| Cổng | Vai trò | Chuẩn | Yêu cầu |
+|---|---|---|---|
+| **25** | MTA → MTA (relay/mail exchange) | RFC 5321 | Không AUTH giữa server với server; TLS *opportunistic* |
+| **587** | Submission: MUA → MSA của mình | RFC 6409 | **Bắt buộc SMTP AUTH**; STARTTLS theo best practice RFC 8314 |
+| **465** | SMTPS/submissions: MUA → MSA, **implicit TLS** | RFC 8314 | TLS ngay từ byte đầu tiên |
+
+- **Port 25** là đường trục giữa các MTA. Ở đây người ta dùng **opportunistic TLS** (extension `STARTTLS` cho SMTP được định nghĩa lần đầu ở RFC 2487, rồi được chuẩn hóa lại trong RFC 3207 — RFC 3207 thay thế RFC 2487): MTA gọi `STARTTLS`, nếu bạn nhận hỗ trợ thì bật mã hóa, **nếu không thì vẫn gửi plaintext** — vì thư phải tới nơi, không thể vì bạn nhận chưa có TLS mà bounce. Điểm yếu của opportunistic là bị downgrade/stripping nếu kẻ tấn công đứng giữa chặn được câu trả lời `250-STARTTLS`; các biện pháp buộc TLS giữa các MTA là **DANE** (RFC 6698, cập nhật bởi RFC 8680) và **MTA-STS** (RFC 8461).
+- **Port 587** (RFC 6409 – Message Submission): ra đời để tách "khách gửi thư có tài khoản" khỏi "MTA lạ". Vì client đã AUTH, MSA biết chính xác danh tính → chặn được spam giả mạo nguồn, và có thể **buộc** TLS + AUTH (khác port 25 vốn không thể buộc AUTH giữa các MTA).
+- **Port 465** — xác minh trạng thái chuẩn: đây là ví dụ "chuẩn thay đổi chiều ngược". 465 được một số vendor đăng ký cho "SMTPS" (SMTP-over-SSL, giống HTTPS) giữa thập niên 1990, sau đó bị IANA thu hồi và khai tử khi cộng đồng chuyển sang STARTTLS/587. **RFC 8314** ("Cleartext Considered Obsolete: Use of TLS for Email Submission and Access", Best Current Practice, 1/2018) **phục hồi 465 và khuyến nghị implicit TLS là phương án ưu tiên cho submission và truy cập mailbox**, vì STARTTLS opportunistic trên 587/143/110 vẫn cho phép attacker loại bỏ TLS (stripping), còn implicit TLS thì kết nối không tồn tại nếu TLS không thành lập. RFC 8314 cũng khuyên trong giai đoạn chuyển tiếp nên hỗ trợ **cả hai** (465 và 587) và dùng **TLS ≥ 1.2**, client không được fallback về plaintext khi kết nối TLS bị lỗi.
+- **SMTPS vs STARTTLS** — bản chất khác nhau: *implicit TLS (SMTPS)* = handshake TLS trước khi bất cứ dòng SMTP nào chạy (connect vào là `openssl s_client` không cần `-starttls`); *STARTTLS (explicit, RFC 3207)* = bắt đầu plaintext, `EHLO` → `STARTTLS` → `220 Ready to start TLS` → TLS handshake → chạy `EHLO` lại (vì extension list có thể đổi, và lệnh AUTH **chỉ nên** xuất hiện sau TLS để tránh lộ credential). Trên Ubuntu, cấu hình `smtpd_tls_security_level` trong `/etc/postfix/main.cf` (các mức `none`/`may`/`encrypt`/`secure`/`dane`) chính là công tắc opportunistic vs mandatory — chương quản trị sẽ đi sâu.
+
+**Quan sát trong lab**: so sánh ba kết nối tới cùng một Postfix: (1) `nc mail.lab.local 25` rồi `EHLO` — thấy `250-STARTTLS` trong danh sách extension (nếu chưa bật `smtpd_tls_security_level=encrypt`, server vẫn nhận thư plaintext trên 25); (2) `openssl s_client -connect mail.lab.local:465` — kết nối TLS ngay, chạy `EHLO` thấy server **không** báo `STARTTLS` vì toàn bộ phiên đã mã hóa; (3) `tcpdump -i any -A port 587` trong khi Thunderbird submission → chỉ thấy bất định sau điểm STARTTLS, phần trước đó đọc được `EHLO` plaintext.
+
+Nguồn:
+- https://www.rfc-editor.org/rfc/rfc8314.html
+- https://datatracker.ietf.org/doc/html/rfc6409
+- https://datatracker.ietf.org/doc/html/rfc2487 , https://datatracker.ietf.org/doc/html/rfc3207
+- https://www.postfix.org/TLS_README.html
+
+### 2b.4 SMTP AUTH (RFC 4954): PLAIN, LOGIN và CRAM-MD5
+
+SMTP AUTH (extension `AUTH`, RFC 4954 thay RFC 2554) cho phép MSA chứng thực người gửi trước khi cho relay. Server công bố cơ chế qua `EHLO` (`250-AUTH PLAIN LOGIN CRAM-MD5`), client chọn một cơ chế. Handshake dạng base64 challenge-response: `C: AUTH PLAIN <b64>` hoặc `C: AUTH LOGIN` → `S: 334 <b64 prompt>` → `C: <b64>`.
+
+| Cơ chế | Cách hoạt động | Không có TLS | Có TLS |
+|---|---|---|---|
+| **PLAIN** (RFC 4616) | base64 của `user\0password` — **mã hóa thuận nghịch**, ai bắt được gói là decode ra mật khẩu | **Lộ mật khẩu** (chỉ cần base64 -d) | An toàn — nhưng server nên chỉ quảng bá khi phiên đã TLS |
+| **LOGIN** | tương tự PLAIN nhưng tách 2 bước base64 username / password — **không phải cơ chế chuẩn IETF**, tồn tại như legacy tương thích | **Lộ mật khẩu** (thậm chí lộ từng bước) | An toàn tương đương PLAIN |
+| **CRAM-MD5** (RFC 2195) | server gửi challenge (nonce), client trả `HMAC-MD5(password, challenge)` — **không bao giờ gửi mật khẩu** | **Không lộ mật khẩu trực tiếp**, nhưng attacker bắt được challenge + response có thể chạy **offline dictionary attack** (thử từng mật khẩu trong wordlist tính lại HMAC) | An toàn về mặt đường truyền, nhưng bị coi là lỗi thời so với SCRAM/OAUTHBEARER; vẫn tốt hơn PLAIN không TLS |
+
+Kết luận thực hành (và là điểm chốt cho phần phòng ngừa): **một khi có TLS đủ mạnh, PLAIN/LOGIN không còn lộ mật khẩu** vì toàn bộ nội dung phiên đã mã hóa — nên Postfix/Dovecot ngày nay cấu hình `smtpd_tls_auth_only = yes` và chỉ bật PLAIN sau STARTTLS. **Nguy hiểm thật sự là PLAIN/LOGIN trên kết nối plaintext** (port 25/587 không TLS): mật khẩu bay qua mạng dưới dạng base64 đọc được bằng `tcpdump`. CRAM-MD5 sinh ra để chịu được plaintext nhưng bị đánh bại ngoại tuyến khi mật khẩu yếu — không còn là lý do để chấp nhận AUTH không TLS.
+
+Trong lab Postfix + Dovecot SASL (`/etc/postfix/main.cf`: `smtpd_sasl_type = dovecot`, `smtpd_sasl_path = private/auth`), kiểm chứng bằng: `openssl s_client -starttls smtp -connect mail.lab.local:587` rồi gõ tay `AUTH LOGIN` — với cùng lệnh đó nhưng qua `nc` plaintext trên cấu hình `smtpd_tls_auth_only=yes`, server từ chối `538 5.7.9 Error: SMTP server requires TLS`.
+
+**Ghi chú đạo đức**: công cụ brute-force dịch vụ AUTH (hydra, medusa…) tồn tại và chỉ được phép thử nghiệm trên máy lab do nhóm sở hữu với mật khẩu giả lập; chương 5 (phát hiện sớm) trình bày cách *phát hiện* các chuỗi thử sai này qua log + fail2ban chứ không hướng dẫn tấn công hệ thống thật.
+
+Nguồn:
+- https://datatracker.ietf.org/doc/html/rfc4954
+- https://www.rfc-editor.org/rfc/rfc4616.html , https://datatracker.ietf.org/doc/html/rfc2195
+- https://www.postfix.org/SASL_README.html
+
+### 2b.5 POP3: mô hình tải-và-xóa đơn giản (RFC 1939)
+
+POP3 (RFC 1939, 1996) thiết kế cho kỷ nguyên dial-up: client **tải toàn bộ thư về local**, rồi mặc định xóa trên server (hoặc "leave on server" nếu cấu hình — nhưng về bản chất server chỉ còn là nơi trung chuyển). POP3 **stateless** giữa các phiên: sau khi download, MUA tự quản lý tất cả; server không biết bạn đã đọc thư nào, không có khái niệm folder.
+
+Phiên mẫu (lab: `nc mail.lab.local 110`):
+
+```text
+S: +OK mail.lab.local POP3 Dovecot (Ubuntu) ready   <- POP3 trả lời '+OK' / '-ERR', chia 3 trạng thái:
+C: USER binh                              <- AUTHORIZATION state
+S: +OK
+C: PASS matkhaugia                       <- mật khẩu plaintext nếu chưa STLS/TLS!
+S: +OK Logged in.
+C: STAT
+S: +OK 3 1522                             <- 3 message, tổng 1522 octets
+C: LIST
+S: +OK 3 messages:
+S: 1 450
+S: 2 700
+S: 3 372
+S: .
+C: RETR 2                                 <- tải nguyên văn message #2 (header + body)
+S: +OK 700 octets
+S: (nội dung thư...)
+S: .
+C: DELE 2                                 <- đánh dấu xóa (chỉ thực sự xóa khi QUIT)
+S: +OK message 2 deleted
+C: QUIT                                   <- TRANSACTION state chốt; xóa các thư đã DELE
+S: +OK Dovecot POP3 mail.lab.local signing off.
+```
+
+Các lệnh cốt lõi: `USER/PASS` (hoặc `APOP`), `STAT`, `LIST`, `UIDL` (ID bất biến của mỗi thư — công cụ để client "leave-on-server" không tải trùng), `RETR`, `DELE`, `NOOP`, `QUIT`. Nhận xét quan trọng cho phần bảo mật: **POP3 chỉ làm việc với mailbox INBOX**, không tạo/nhánh folder, không đồng bộ flag đã đọc — mỗi thiết bị tải về là một bản sao độc lập, dẫn tới hệ quả so sánh ở 2b.7.
+
+- **APOP** (RFC 1957): challenge `+OK <timestamp@host>`, client gửi `MD5(timestamp + mật_khẩu)` — không lộ mật khẩu trên đường truyền nhưng dựa trên MD5 đã suy yếu và **vẫn dính offline attack** giống CRAM-MD5 (attacker giữ challenge + response rồi thử wordlist ngoại tuyến); ngày nay coi là legacy, các triển khai hiện đại nên tắt.
+- **STLS** (RFC 2595): phiên bản STARTTLS của POP3 — `C: STLS` → `+OK Begin TLS negotiation` → TLS handshake, sau đó chạy `CAPA` lại.
+- **Cổng**: 110 (POP3 plaintext/STLS) và **995 (POP3S, implicit TLS)** — RFC 8314 khuyến nghị 995 cho client hiện đại.
+
+**Quan sát trong lab**: `tcpdump -i any -A tcp port 110` khi Thunderbird dùng POP3 không TLS trên lab riêng: thấy nguyên `PASS <mật_khẩu-giả-lab>`. Bật cấu hình `ssl = required` trong Dovecot thì server chỉ nghe 995 (`openssl s_client -connect mail.lab.local:995`) và từ chối 110 (`-ERR POP3 server requires SSL connections`).
+
+Nguồn:
+- https://datatracker.ietf.org/doc/html/rfc1939 , https://datatracker.ietf.org/doc/html/rfc1957
+- https://datatracker.ietf.org/doc/html/rfc2595
+- https://doc.dovecot.org/
+
+### 2b.6 IMAP: mailbox nằm trên server (RFC 3501 → RFC 9051)
+
+**Xác minh trạng thái chuẩn (8/2026)**: RFC 3501 (IMAP4rev1, 2003) đã được **thay thế chính thức bởi RFC 9051 – IMAP4rev2 (2021)**; RFC 3501 hiện mang trạng thái *Obsolete*. Thực tế triển khai trên các server phổ biến (Dovecot, Gmail) vẫn nói chuyện tương thích ngược với cả hai. IMAP4rev2 về cơ bản là IMAP4rev1 **cộng thêm** các extension vốn rời rạc thành bắt buộc trong lõi: `SASL-IR`, `LOGO`, `ENABLE`, `IDLE`... — server hiện đại phải quảng bá `IMAP4rev2` qua capability.
+
+IMAP đảo ngược triết lý POP3: **thư ở lại server**, client chỉ là "cửa sổ". Server **stateful** (phiên có chọn mailbox, giữ unseen counter), và hỗ trợ:
+
+- **Folder/mailbox** (`INBOX`, `Gửi đi`, `Lưu trữ/2026/...`) — cấu trúc cây, đồng bộ mọi thiết bị.
+- **Flag**: `\Seen` (đã đọc), `\Answered`, `\Flagged`, `\Deleted`, `\Draft` + keyword tùy biến — "đọc trên điện thoại thì laptop cũng hiện đã đọc".
+- **Fetch một phần (partial fetch)**: chỉ lấy header `BODY[HEADER.FIELDS (SUBJECT)]`, lấy `BODYSTRUCTURE`, hoặc một đoạn body bằng `BODY[]<offset.octets>` — tiết kiệm băng thông, cho phép xem trước 20 ký tự mà không tải file 10MB.
+- **UID vs sequence number**: mỗi message có UID bền vững trong mailbox; sequence number đổi khi message bị expunge — lý do nên thao tác bằng `UID FETCH/STORE`.
+- **IDLE** (RFC 2177, nằm trong rev2): client giữ kết nối mở, server *push* thông báo `* N EXISTS` khi có thư mới — nền tảng của "push email" kiểu smartphone mà không cần polling.
+
+Phiên mẫu (lab: `nc mail.lab.local 143`, hoặc `openssl s_client -connect mail.lab.local:993`):
+
+```text
+S: * OK [CAPABILITY IMAP4rev2 ... LOGINDISABLED]  <- chưa TLS thì LOGINDISABLED: không cho LOGIN plaintext
+C: a STARTTLS
+S: a OK [CAPABILITY IMAP4rev2 ... AUTH=PLAIN] Begin TLS negotiation now   <- từ đây phiên đã mã hóa
+C: n LOGIN binh matkhau
+S: n OK [CAPABILITY ...] Login completed
+C: m SELECT INBOX
+S: * 4 EXISTS                <- mailbox có 4 message
+S: * 1 RECENT
+S: * OK [UIDVALIDITY 17] [UIDNEXT 21]
+S: m OK [READ-WRITE] SELECT completed
+C: x FETCH 3 (BODY.PEEK[HEADER.FIELDS (SUBJECT)] FLAGS)   <- PEEK = xem header KHÔNG đánh dấu \Seen
+S: * 3 FETCH (FLAGS (\Recent) BODY[HEADER.FIELDS (SUBJECT)] {20}
+S: Subject: Hop lab
+S: )
+S: x OK FETCH completed
+C: y SEARCH UNSEEN           <- tìm thư chưa đọc — server-side search
+S: * SEARCH 2 3              <- response untagged '*' liệt kê sequence number
+S: y OK SEARCH completed
+C: z STORE 1 +FLAGS (\Seen)  <- đồng bộ trạng thái đã đọc cho mọi thiết bị
+S: * 1 FETCH (FLAGS (\Seen)) <- server trả flag mới dạng untagged
+S: z OK STORE completed
+C: p LOGOUT                  <- (trước LOGOUT có thể dùng IDLE để chờ thư mới)
+S: * BYE Dovecot...
+S: p OK LOGOUT completed
+```
+
+- **STARTTLS**: RFC 2595 định nghĩa lệnh `STARTTLS` cho IMAP (và POP3); trên cổng 143, trước khi AUTH. Best practice RFC 8314 là dùng thẳng cổng **993 (IMAPS, implicit TLS)**.
+- **SASL**: IMAP AUTH dùng bộ cơ chế SASL chung với SMTP — PLAIN, LOGIN, CRAM-MD5, và hiện đại hơn là **OAUTHBEARER** (Gmail/Microsoft yêu cầu) hay **EXTERNAL** (client certificate).
+
+**Quan sát trong lab**: bật Thunderbird tài khoản IMAP lab, xóa một thư trên laptop → `ss -tlnp` + log Dovecot `/var/log/mail.log` (`imap-login: Login: user=<binh>, method=PLAIN, rip=...`) và trên điện thoại refresh → thấy `\Deleted` đã đồng bộ; so sánh với tài khoản POP3 cùng kịch bản → mỗi thiết bị giữ bản riêng, không đồng bộ.
+
+Nguồn:
+- https://www.rfc-editor.org/rfc/rfc9051.html (IMAP4rev2 — trạng thái hiện hành, obsoletes RFC 3501)
+- https://www.rfc-editor.org/rfc/rfc3501.html (IMAP4rev1 — obsolete)
+- https://datatracker.ietf.org/doc/html/rfc2595 , https://datatracker.ietf.org/doc/html/rfc2177
+- https://doc.dovecot.org/latest/
+
+### 2b.7 POP3 hay IMAP? — so sánh theo use case
+
+| Tiêu chí | POP3 (110/995) | IMAP (143/993) |
+|---|---|---|
+| **Số thiết bị** | 1 thiết bị "chính" — vì tải về là mất bản server (mặc định) | **Nhiều thiết bị** (điện thoại + laptop + webmail) — server là nguồn sự thật |
+| **Trạng thái đã đọc/flag** | Không đồng bộ; mỗi máy tự đánh dấu cục bộ | Đồng bộ `\Seen`, `\Answered`, `\Flagged` real-time |
+| **Folder** | Chỉ INBOX | Cây mailbox đầy đủ, move/copy phía server |
+| **Offline** | Tốt (đã tải hết về local) | Hạn chế — phải cache (Dovecot supports CONDSTORE/QRESYNC và client offline sync) |
+| **Băng thông/lưu trữ client** | Tốn bandwidth lần đầu (tải full), nhẹ server | Partial fetch nhẹ client hơn nhưng tốn **dung lượng server** và I/O |
+| **Dung lượng server** | Thấp (xóa sau download) | Cao — mailbox phình theo năm, cần quota, expunge, archival |
+| **Rủi ro mất dữ liệu** | **Cao**: chết ổ SSD laptop = mất hết thư đã xóa server | Thấp: dữ liệu nằm trên server (nhưng thành single point of failure → cần backup) |
+| **Khi nào POP3 hợp lý** | Thiết bị đơn lẻ, mailbox giới hạn dung lượng khắt khe, hoặc pipeline lấy-thư-tự-động (`getmail` về file) | Mặc định cho người dùng hiện đại đa thiết bị, và cho MDA-server chạy webmail |
+
+Kết luận cho lab của đồ án: dùng **IMAP/993** cho người dùng, chỉ bật POP3 khi cố ý minh họa khác biệt (hoặc khi thiết bị nhúng chỉ nói được POP3).
+
+Nguồn:
+- https://doc.dovecot.org/latest/configuration/services/imap.html
+- https://www.rfc-editor.org/rfc/rfc3501.html (IMAP4rev1 — phần mở đầu có so sánh trực tiếp IMAP vs POP4)
+
+### 2b.8 Luồng email đầy đủ trong lab: An gửi Bình một bức thư đi qua lab như thế nào
+
+Kịch bản: An dùng Thunderbird tại `laptop.an.lab`, Bình dùng Thunderbird tại `desktop.binh.lab`; cả hai thuộc miền `lab.local` phục vụ bởi một máy chủ Ubuntu 26.04 chạy Postfix (MSA+MTA+MDA) + Dovecot (MRA). Toàn bộ diễn ra trong mạng riêng của nhóm.
+
+```
+(1) An nhấn Send
+    Thunderbird ── TLS (implicit, 465 | STARTTLS, 587) ──► Dovecot-SASL/Postfix MSA
+    [MÃ HÓA] phiên: AUTH PLAIN (sau TLS) → MAIL FROM:<an@lab.local>
+             → RCPT TO:<binh@lab.local> → DATA → "250 queued as A1B2C3"
+    [PLAINTEXT nếu dùng 587/25 mà không bật TLS — lab cần chứng minh bằng tcpdump]
+
+(2) Postfix MTA phân tích RCPT: domain 'lab.local' nằm trong mydestination
+    → KHÔNG relay ra ngoài; thư chuyển từ queue 'incoming' vào 'active' để delivery
+
+(3) bàn giao (delivery): Postfix chạy agent 'lmtp:unix:/private/dovecot-lmtp' (LMTP local)
+    Dovecot LDA kiểm tra hộp thư tồn tại, quota, (tùy chọn) chạy sieve filter
+    → ghi file vào /home/binh/Maildir/lab.local/binh/new/  (Maildir: 1 thư = 1 file)
+    mail.log: "status=sent (dovecot)"
+
+(4) Bình mở Thunderbird
+    desktop.binh.lab ── TLS implicit cổng 993 (IMAPS) ──► Dovecot IMAP
+    [MÃ HÓA] n LOGIN → m SELECT INBOX → x UID FETCH... → * 1 EXISTS (thư mới!)
+    flag \Seen được ghi NGAY vào Dovecot index → mọi thiết bị khác của Bình cũng "đã đọc"
+
+(5) Bounce đường vòng (nếu sai): RCPT gửi tới <khongtonTai@lab.local> trong bước (1)
+    → "550 5.1.1 User unknown"; nếu chấp nhận rồi mới biết (queue) → MTA gửi
+       message delivery status (DSN) về envelope MAIL FROM (Return-Path)
+```
+
+**Đâu là plaintext, đâu là TLS — bảng chốt**:
+
+| Chặng | Cổng/phiên | Mặc định | Đúng chuẩn (RFC 8314) |
+|---|---|---|---|
+| (1) MUA→MSA submission | 587/465 | Bắt buộc AUTH; TLS phụ thuộc cấu hình server | **TLS toàn trình** (465 implicit hoặc 587 + STARTTLS bắt buộc, `smtpd_tls_auth_only=yes`) |
+| (2)(3) nội bộ MTA→MDA→mailbox | unix socket/LMTP loopback | plaintext trong máy, không ra mạng | OK (không có đường truyền để tấn công; có thể thêm TLS cho lab nhiều máy) |
+| (giữa hai MTA, nếu Bình ở domain khác) | 25 | Opportunistic TLS — **rơi về plaintext nếu bạn nhận không hỗ trợ hoặc bị strip** | DANE/MTA-STS buộc TLS |
+| (4) MUA↔MRA | 143/993 (110/995) | 143/110 cho phép plaintext nếu không siết | **993/995 implicit TLS**; Dovecot `ssl=required`, `disable_plaintext_auth=yes` |
+
+Hai hệ quả cần ghi nhớ cho các chương sau: (a) nội dung email được **mã hóa đường truyền** (TLS) nhưng **không mã hóa đầu-cuối** (E2EE) — người quản trị server và MTA transit đều *đọc được* Maildir; (b) thông tin định danh (envelope, AUTH identity) đi theo từng chặng khác nhau với header hiển thị — nên phishing và spoofing sống khỏe ở tầng "header không ai kiểm".
+
+**Tổng kết quan sát trong lab** (không tấn công, chỉ phân tích giao thức trên mạng riêng): dùng Wireshark capture cổng 25/143/110 (profile `smtp`, `imap`, `pop`) để đọc từng dòng lệnh như các phiên mẫu trên (Statistics → Packet Sizes, và Follow → TCP Stream để dựng lại phiên) — đây là cách trực quan nhất để ghi nhớ state machine của từng giao thức; sau đó bật TLS và lặp lại để thấy payload trở thành opaque (chỉ còn thấy TLS record).
+
+Nguồn:
+- https://www.wireshark.org/docs/wsug_html/ (User's Guide; xem mục Follow TCP Stream và danh sách protocol dissector)
+- https://www.postfix.org/LMTP_README.html
+- https://doc.dovecot.org/latest/configuration/services/lmtp.html
+- https://ubuntu.com/server/docs/how-to/mail-services/
+
+---
+
+## 3a. Phần mềm triển khai trên Ubuntu Server: vsftpd, OpenSSH, Postfix, Dovecot
+
+Chương này KHÔNG trình bày cấu hình hoàn chỉnh (không có file "copy-paste là chạy"). Mục tiêu của nó là trang bị **kiến thức cần đọc trước**: mỗi phần mềm đóng vai trò gì trong hệ thống, file cấu hình nằm ở đâu, log ghi ra đâu, những tham số nào quan trọng và **ý nghĩa bảo mật của từng tham số**. Khi hiểu bản chất, bạn mới đọc hiểu được cấu hình mẫu và phát hiện được cấu hình sai (misconfiguration) — nguồn gốc của phần lớn sự cố bảo mật dịch vụ.
+
+**Phiên bản tham chiếu (kiểm tra tháng 8/2026):** bản LTS hiện hành của Ubuntu Server là **26.04 LTS "Resolute Raccoon"** (phát hành 23/04/2026, hỗ trợ đến 2031); **24.04 LTS "Noble Numbat"** vẫn được hỗ trợ đầy đủ (đến 04/2029). Chương này lấy mốc **24.04 LTS trở lên**. Hai lưu ý lớn khi làm trên bản mới:
+
+| Thành phần | Ubuntu 24.04 LTS | Ubuntu 26.04 LTS | Hệ quả |
+|---|---|---|---|
+| vsftpd | 3.0.5 | 3.0.5 | Như nhau (upstream gần như "đóng băng" từ 2021) |
+| OpenSSH | 9.6p1 (Canonical chỉ backport vá, không bump bản) | phiên bản mới hơn cùng họ | Cú pháp `sshd_config` ổn định |
+| Postfix | 3.8 | 3.10 | Cú pháp ổn định, tham số mới chủ yếu về TLS/DNSSEC |
+| Dovecot | **2.3.x** | **2.4.x** | **Cấu hình 2.3 KHÔNG tương thích 2.4** — xem mục 3a.4 |
+
+Toàn bộ lệnh kiểm thử dưới đây chỉ thực hành trên **lab mạng riêng do nhóm sở hữu**.
+
+---
+
+### 3a.1 vsftpd — Very Secure FTP Daemon
+
+#### Vai trò và vị trí trong hệ thống
+
+vsftpd là FTP server mặc định khi nhắc tới "FTP trên Linux" trong các giáo trình quản trị. Nó do Chris Evans viết năm 2000 với mục tiêu "very secure" (tách tiến trình, chạy với quyền thấp, có chroot), nay được Red Hat duy trì; mã nguồn public tại `github.com/richardcochran/vsftpd`, trang chủ `security.appspot.com/vsftpd.html`. Phiên bản upstream mới nhất là **3.0.5 (2021)** — một signal quan trọng: vsftpd được coi là "xong việc, ít thay đổi", không phải dự án chết yểu.
+
+Điểm cần phân biệt ngay với các daemon khác: vsftpd **không phải** daemon "một listen + một fork" kiểu cũ. Trên Debian/Ubuntu nó chạy ở chế độ standalone — **tự chiếm cổng 21 và tự fork tiến trình con** cho mỗi kết nối, dưới systemd unit `vsftpd.service` (không chạy qua socket-activate). Chi tiết bản đóng gói Ubuntu noble: file `/etc/vsftpd.conf` gốc đặt `listen=NO, listen_ipv6=YES` — vsftpd lắng nghe qua socket IPv6 dual-stack (vẫn nhận cả kết nối IPv4); trên các bản chỉ có IPv4 hoặc muốn rõ ràng, quản trị viên bật `listen=YES`.
+
+#### File cấu hình: một file duy nhất, KHÔNG có drop-in
+
+- File chính: **`/etc/vsftpd.conf`** (quy ước Debian/Ubuntu; Red Hat lại dùng `/etc/vsftpd/vsftpd.conf` — đừng nhầm khi đọc tài liệu chéo distro).
+- **Kiểm chứng yêu cầu "/etc/vsftpd.conf.d": không tồn tại.** vsftpd upstream **không hỗ trợ thư mục drop-in** và không có directive `include`. Cơ chế gần nhất là `user_config_dir=/etc/vsftpd/conf.d` — nhưng đây là **cấu hình per-user** (mỗi file tên theo username), có từ bản 2.1.x, không phải fragment cấu hình global. Muốn nhiều mảnh cấu hình, quản trị viên phải tự concatenation lúc deploy hoặc chạy nhiều instance.
+- File danh sách user: directive `userlist_file` mặc định **`/etc/vsftpd.user_list`**; ngoài ra PAM thường chặn theo **`/etc/ftpusers`** (xem phần PAM).
+- Reload: `systemctl reload vsftpd` (vsftpd nhận SIGHUP), hoặc `systemctl restart vsftpd`; trạng thái: `systemctl status vsftpd`.
+
+#### Các tham số PHẢI hiểu (kèm ý nghĩa bảo mật)
+
+Bảng dưới lấy **default upstream** làm mốc; Ubuntu đã vá/ghi đè nhiều giá trị trong `vsftpd.conf` đóng gói — luôn kiểm tra bằng `grep -v '^#' /etc/vsftpd.conf`.
+
+| Tham số | Default upstream | Ý nghĩa & góc nhìn bảo mật |
+|---|---|---|
+| `anonymous_enable` | **YES (nguy hiểm!)** | Cho phép login không mật khẩu (user `anonymous`/`ftp`). FTP ẩn danh từng là chuẩn Internet nhưng nay là vector phát tán malware và rò rỉ dữ liệu. **Ubuntu chủ động đặt `anonymous_enable=NO` ngay trong file mặc định** (man page Debian/Ubuntu ghi "Default: NO" chính vì bản vá này). Khi audit một hệ thống FTP lạ: đây là dòng đầu tiên phải tìm. |
+| `local_enable` | NO | Cho phép user hệ thống (khai báo trong `/etc/passwd`, xác thực qua PAM) đăng nhập FTP. **File `/etc/vsftpd.conf` đóng gói sẵn của Ubuntu đặt tường minh `local_enable=YES`** — vì không có dòng này thì mọi login non-anonymous (kể cả virtual user) đều vô hiệu. |
+| `write_enable` | NO | Bật ghi (upload, DELE, RNFR, MKD). Bật `write_enable` đồng nghĩa mở khả năng đối phương **ghi file thực thi/web shell** vào vùng web nếu chroot không nghiêm ngặt — chỉ bật cho nhóm thực sự cần. |
+| `local_umask` | 077 | Quyền file tạo bởi user local. umask 022 phổ biến trong hướng dẫn nhưng cho file world-readable; 077 là mặc định " paranoia an toàn" của vsftpd. Ảnh hưởng trực tiếp đến việc ai đọc được dữ liệu vừa upload. |
+| `chroot_local_user` | NO | Nhốt user vào home directory. **Không có chroot, một tài khoản FTP là bàn đạp duyệt toàn bộ filesystem** và đọc mọi file mà quyền của tài khoản đó cho phép (kể cả file hệ thống world-readable). vsftpd còn mặc định từ chối nếu chroot không an toàn. |
+| `allow_writeable_chroot` | (thêm từ 3.0.0) | vsftpd **cố tình báo lỗi "500 OOPS: vsftpd: refusing to run with writable root inside chroot()"** (ràng buộc được giới thiệu từ bản 2.3.5, 2011) khi thư mục chroot thuộc sở hữu của user và ghi được — vì kỹ thuật `bind mount`/escape khỏi writable chroot là có thật. Cần upload ngay tại root chroot thì đặt `allow_writeable_chroot=YES`, nhưng hiểu rằng bạn **đánh đổi một lớp phòng vệ**; giải pháp sạch hơn: chroot thuộc `root:root`, có thư mục con `upload/` cho user ghi. |
+| `pasv_enable`, `pasv_min_port`, `pasv_max_port` | YES / 0 / 0 | FTP chủ động (active, PORT) vs bị động (passive, PASV). Passive: server báo một cổng dữ liệu ngẫu nhiên trong khoảng `pasv_min_port..pasv_max_port` (0 = bất kỳ, do kernel chọn). Với firewall/NAT: **chặn mọi thứ trừ 20-21 rồi mở đúng dải đã cấu hình**, ví dụ giới hạn 30000–30009 — biến "cổng dữ liệu không đoán được" thành dải hữu hạn có audit trail. |
+| `ssl_enable`, `rsa_cert_file`, `rsa_private_key_file`, `allow_anon_ssl` | NO / (upstream: `/usr/share/ssl/certs/vsftpd.pem`; Ubuntu ghi đè thành snakeoil) / — | FTP gốc **gửi plaintext cả user lẫn password** (RFC 959 không có TLS; phần mở rộng bảo mật là RFC 2228, và FTPS/EXPlicit TLS chuẩn hoá ở RFC 4217). Bật `ssl_enable=YES` + cặp chứng chỉ để dùng FTPES trên cổng 21 (lệnh `AUTH TLS`); `force_local_data_ssl`/`force_local_logins_ssl` mới thực sự chặn version không mã hoá. `allow_anon_ssl` chỉ đáng quan tâm khi còn bật anonymous. Ubuntu default trỏ `rsa_cert_file=/etc/ssl/certs/ssl-cert-snakeoil.pem` (chứng chỉ tự ký của gói `ssl-certs`) — đủ mã hoá nhưng **không xác thực được danh tính** (client phải tự chấp nhận fingerprint). |
+| `userlist_enable`, `userlist_deny`, `userlist_file` | NO / YES / `/etc/vsftpd.user_list` | Bộ lọc danh sách user. `userlist_deny=YES` = danh sách là **blacklist** (chặn những người có tên); `=NO` = biến nó thành **whitelist** — cách gọn nhất để chỉ 2–3 account được dùng FTP mà không đụng `/etc/passwd`. (Chú ý tên đúng của directive là `userlist_file`, không phải `user_list_file` — rất nhiều blog viết sai.) |
+| `secure_chroot_dir` | upstream: `/usr/share/empty`; Ubuntu đặt tường minh `secure_chroot_dir=/var/run/vsftpd/empty` trong config đóng gói (unit có `ExecStartPre=mkdir -p` cho nó) | Trong model tách tiến trình của vsftpd, các tiến trình con **nhảy (chroot) vào một thư mục rỗng trước khi đổi quyền** thành user không có quyền gì; đây là "xưởng giam giữ tạm". Nếu trỏ sai (không tồn tại), service không khởi động được — và về nguyên lý, đừng bao giờ trỏ nó vào nơi có dữ liệu. |
+
+Ví dụ một đoạn file cấu hình mẫu dạng "dòng nào ra dòng ấy" chỉ để học đọc:
+
+```bash
+anonymous_enable=NO          # tắt ẩn danh — Ubuntu mặc định đã NO, đừng bật lại
+local_enable=YES             # cho user hệ thống đăng nhập
+write_enable=YES             # cho phép upload
+local_umask=022              # file upload ra 644 — cân nhắc 077
+chroot_local_user=YES        # nhốt user vào home
+allow_writeable_chroot=YES   # CHẤP NĂN: cho phép ghi trong chroot — xem bảng trên
+pasv_enable=YES
+pasv_min_port=30000          # mở firewall đúng dải này
+pasv_max_port=30009
+ssl_enable=YES               # bật FTPES
+rsa_cert_file=/etc/ssl/certs/vsftpd.pem
+rsa_private_key_file=/etc/ssl/private/vsftpd.key
+force_local_logins_ssl=YES   # bắt buộc cả lệnh USER/PASS đi qua TLS
+userlist_enable=YES
+userlist_deny=NO             # whitelist
+userlist_file=/etc/vsftpd.ftpusers_allowed
+```
+
+#### PAM: cánh cửa xác thực thật sự
+
+vsftpd **không tự quản lý mật khẩu**; nó đặt `pam_service_name=vsftpd` (mặc định) và giao việc xác thực cho PAM qua `/etc/pam.d/vsftpd`. Trên Ubuntu file này include cấu hình COMMON (`common-auth`, `common-account`) — nghĩa là:
+
+- User nào login được Linux **mặc định login được FTP**, kể cả tài khoản dịch vụ — trừ khi bị chặn bởi `/etc/ftpusers` (PAM `pam_listfile.so sense=deny` thường được kích hoạt ở đây) hoặc bởi whitelist `user_list`.
+- Vì vậy khi điều tra "vì sao tài khoản X vẫn vào được FTP" phải đọc **cả ba lớp**: `/etc/vsftpd.conf`, `/etc/pam.d/vsftpd`, `/etc/ftpusers` (và `/etc/shells` nếu bật `check_shell`).
+- Mật khẩu trong PAM đến từ `/etc/shadow` (hash) — nhưng **đường truyền vẫn plaintext nếu chưa bật `ssl_enable`**, nên đổi mật khẩu mạnh không thay thế được TLS.
+
+#### Log: hai chế độ, kiểm tra cái nào đang bật
+
+- Default upstream của `xferlog_enable` là **NO**, nhưng file `/etc/vsftpd.conf` đóng gói của Ubuntu đặt tường minh `xferlog_enable=YES` (man page Ubuntu ghi "Default: NO (but the sample config file enables it)"). Khi bật và `xferlog_std_format=NO` như mặc định, vsftpd ghi log "kiểu vsftpd" vào **syslog** (facility `ftp`) → trên Ubuntu đọc qua `/var/log/syslog` hoặc `journalctl -u vsftpd`; nếu muốn vào file riêng thì đặt `xferlog_file=/var/log/vsftpd.log` (hoặc `vsftpd_log_file=` — directive riêng cho log kiểu vsftpd).
+- `xferlog_std_format=YES` đổi sang format wu-ftpd `xferlog` cũ → `/var/log/xferlog` (mặc định của `xferlog_file` ở upstream; ít gặp).
+- Log FTP chỉ có giá trị khi nó còn ghi được: giám sát dung lượng, và nhớ rằng log plaintext (login thành công/thất bại) là đầu vào vàng cho phân tích brute force ở chương phát hiện sớm.
+
+```bash
+systemctl status vsftpd          # đơn vị + log gần nhất
+ss -tlnp | grep ':21\b'          # cổng điều khiển 21 có listen không
+# Lưu ý: cổng PASV KHÔNG xuất hiện trong ss -tlnp — không có tiến trình nào "listen" sẵn
+# cả dải; mỗi phiên dữ liệu chỉ tạm thời chiếm một cổng trong dải 30000-30009.
+# Bắt được nó khi đang transfer: ss -tnp | grep -E ':3000[0-9]\b'
+```
+
+**Nguồn:** https://security.appspot.com/vsftpd.html — https://manpages.ubuntu.com/manpages/noble/man5/vsftpd.conf.5.html — https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/6/html/deployment_guide/s2-ftp-servers-vsftpd (bảng tham số vsftpd chuẩn của Red Hat) — https://github.com/richardcochran/vsftpd — RFC 959, RFC 4217 (https://www.rfc-editor.org/rfc/rfc959, https://www.rfc-editor.org/rfc/rfc4217).
+
+---
+
+### 3a.2 OpenSSH Server: SFTP không phải một "dịch vụ cài riêng"
+
+#### Vai trò: Subsystem của sshd
+
+Điểm nhận thức đầu tiên: **không có gói `sftp-server` riêng để bật trên Ubuntu** — SFTP là một *subsystem* chạy bên trong phiên SSH đã xác thực, do `sshd` điều phối. Hệ quả: **Ubuntu Server có SSH bật sẵn thì mặc nhiên có SFTP**, không cần cài gì thêm (`openssh-server` gần như luôn có mặt sau install, nếu người cài đặt tick "Install OpenSSH server"). SSH đồng thời gánh cả remote shell — nghĩa là mọi hardening SSH (mục 2.4) tự động là hardening cho SFTP, và ngược lại cấu hình SSH cẩu thả mở cửa SFTP.
+
+#### Cấu trúc file cấu hình và cơ chế Include
+
+- File chính: **`/etc/ssh/sshd_config`** — dòng đầu file mặc định của Ubuntu: `Include /etc/ssh/sshd_config.d/*.conf`.
+- Từ OpenSSH 7.3+, các fragment trong **`/etc/ssh/sshd_config.d/`** (xếp theo thứ tự bảng chữ cái, ưu tiên cao hơn định nghĩa sau) là cách Ubuntu quản trị: ví dụ `50-cloud-init.conf` đặt `PasswordAuthentication`. **Lưu ý có tính bẫy:** directive đầu tiên thắng (first-match) với nhiều tham số SSH — nếu `sshd_config` định nghĩa `PermitRootLogin` trước khi Include, fragment có thể bị "che". Audit nhanh cấu hình hiệu dụng: `sshd -T | grep -E 'permitrootlogin|passwordauthentication|subsystem'`.
+- Reload an toàn: `systemctl reload ssh` (Ubuntu dùng tên unit **`ssh`**, không phải `sshd`; trên 24.04 có song song `ssh.socket` cho socket-activation nhưng service `ssh.service` vẫn là chuẩn để reload). Test cú pháp trước reload: `sshd -t`.
+
+#### `Subsystem sftp internal-sftp` — tại sao không phải binary cũ?
+
+Dòng khai báo trong `sshd_config`:
+
+```bash
+Subsystem sftp internal-sftp   # SFTP server chạy TRONG TIẾN TRÌNH sshd
+# Subsystem sftp /usr/lib/openssh/sftp-server   # kiểu cũ: fork binary riêng
+```
+
+Lý do chọn `internal-sftp` khi muốn làm chroot:
+
+1. binary `sftp-server` cũ phải được **copy vào trong từng jail chroot** (kèm thư viện) — dễ sai, khó vá;
+2. `internal-sftp` **có sẵn trong tiến trình sshd đang giữ session**, nên `ChrootDirectory` hoạt động mà không cần filesystem tối giản nào.
+
+#### `ChrootDirectory` và quy tắc sở hữu root:root — giải thích tận gốc
+
+```bash
+Match Group sftpusers
+    ChrootDirectory /srv/sftp/%u   # jail theo user
+    ForceCommand internal-sftp -u 0077  # chỉ SFTP, không cho shell, umask chặt
+    PasswordAuthentication no      # group này chỉ key-based
+```
+
+Điều kiện bắt buộc (nếu vi phạm, sshd từ chối session kèm "bad ownership or modes"): **mọi thành phần của đường dẫn jail, từ `/` đến tận cùng, phải do `root` sở hữu và không được group/world-writable.** Lý do bảo mật rất cụ thể: nếu thư mục cha của jail do user viết được, attacker upload một `authorized_keys`/thư mục con **bên ngoài** jail rồi bind vào trong, hoặc thao túng symlink để phá vỡ jail — chroot chỉ là thay đổi root path, không phải sandbox kiểu container. Jail an toàn là `root` "xây tường", user chỉ được quyền ghi vào **một thư mục con được trỏ riêng** (thường mount loop hoặc đặt trong jail với quyền sở hữu khác).
+
+#### Các tham số an toàn cốt lõi (đọc để audit)
+
+| Tham số | Mặc định Ubuntu | Ý nghĩa bảo mật |
+|---|---|---|
+| `PermitRootLogin` | `prohibit-password` (mặc định upstream, Ubuntu không ghi đè trong `sshd_config`; cloud image còn khoá mật khẩu root ở `/etc/shadow`) | root chỉ vào được bằng key → chặn brute-force mật khẩu root; đặt `no` khi có tài khoản quản trị riêng. |
+| `PasswordAuthentication` | `yes` | Bật mật khẩu = mở cửa cho dictionary attack qua cổng 22. Chuẩn hardening: chuyển `no`, buộc `PubkeyAuthentication yes`. |
+| `PubkeyAuthentication` | `yes` | Xác thực khoá công khai — nếu tắt thì mọi nỗ lực hardening "tắt mật khẩu" phản tác dụng (không ai vào được). |
+| `MaxAuthTries` | 6 | Số lần thử mỗi kết nối (tính theo connection, không phải theo phiên) — giảm tốc brute force; song hành với `LoginGraceTime`. |
+| `Ciphers`, `MACs`, `KexAlgorithms` | chỉ thuật toán hiện đại | SSHv1 bị loại bỏ hoàn toàn; keyword `Protocol` thậm chí **đã bị xóa khỏi sshd_config từ OpenSSH 7.6** (ghi vào sẽ bị "Bad configuration option"). Với SFTP cùng kênh transport, thuật toán yếu sẽ làm cả kênh yếu. |
+
+#### Log và giám sát
+
+SSH ghi qua facility `auth`: `/var/log/auth.log` (rsyslog) hoặc `journalctl -u ssh -f`. Đây là nơi thấy: `Failed password for ... from <ip> port ... ssh2` (brute force), `Accepted publickey for ...` (thành công bằng key), và khi jail sai: `Starting session: subsystem 'sftp' for ...` hoặc `fatal: bad ownership or modes for chroot directory`. `ss -tlnp | grep :22` xác nhận sshd listen; trên môi trường dùng socket-activation, port 22 do `systemd` giữ (cột PID/user hiện `systemd`/`sshd`).
+
+**Nguồn:** https://man.openbsd.org/sshd_config (portable man pages do OpenSSH project duy trì — https://www.openssh.com/portable.html) — https://documentation.ubuntu.com/release-notes/26.04/ — https://canonical.com/blog/canonical-releases-ubuntu-26-04-lts-resolute-raccoon.
+
+---
+
+### 3a.3 Postfix — Mail Transfer Agent (MTA)
+
+#### Kiến trúc: `master.cf` là "bản đồ dịch vụ", `main.cf` là "luật chơi toàn cục"
+
+Postfix tách hai loại cấu hình, và hiểu đúng chỗ nào đặt gì là nửa cuộc chiến:
+
+- **`/etc/postfix/master.cf`** — định nghĩa **dịch vụ nào chạy, tiến trình nào phục vụ, mode gì**: mỗi dòng gồm service name (`smtp`, `submission`, `smtps`, `lmtp`, `pickup`...), type (inet/unix), process management, và daemon tương ứng (`smtpd` cho nhận mail, `qmgr`, `cleanup`, `smtp` client...). Muốn bật cổng 465/587, sửa `master.cf` — không phải `main.cf`.
+- **`/etc/postfix/main.cf`** — **hàng trăm tham số toàn cục** (`postconf` đọc/ghi được; `postconf -n` in ra các giá trị hiệu dụng khác mặc định — công cụ audit số 1).
+- Chạy dưới systemd: `systemctl status postfix`, đổi cấu hình xong `systemctl reload postfix`.
+
+#### Nhóm tham số quyết định "tôi là ai, nhận mail cho domain nào, relay cho ai"
+
+```bash
+myhostname = mail.lab.internal      # FQDN chính mình (EHLO advertise tên này)
+mydomain = lab.internal
+mydestination = $myhostname, localhost.$mydomain, lab.internal
+                                  # chỉ những domain liệt kê ở đây được coi là
+                                  # mail "nội bộ" — deliver vào local mailbox;
+                                  # domain khác → Postfix chỉ relay hoặc từ chối
+inet_interfaces = all             # interface nào LẮNG NGHE 25; `loopback-only` nếu
+                                  # chỉ máy này tự gửi (đóng vai satellite)
+mynetworks = 127.0.0.0/8, ::1     # AI ĐƯỢC coi là "mạng tin cậy"
+```
+
+**Mổ xẻ `mynetworks` — nguồn gốc open relay.** `mynetworks` khai báo dải IP mà Postfix **mặc nhiên cho relay không cần xác thực**. Error kinh điển của quản trị mới: đặt
+
+```bash
+mynetworks = 0.0.0.0/0    # ← TUYỆT ĐỐI TRÁNH
+```
+
+`0.0.0.0/0` = "mọi IP trên Internet đều là người nhà" → kẻ tấn công dùng mail server của bạn gửi spam thiên hạ, bạn bị liệt vào **blocklist** (chẳng hạn Spamhaus), bị nhà mạng cô lập; server của bạn trở thành **open relay** — và các scanner (được các botnet vận hành) quét toàn Internet tìm loại này mỗi ngày. `mynetworks` đúng nghĩa là **dải quản trị**, thường chỉ loopback + subnet nội bộ; mọi thứ ngoài đó phải vượt qua lớp xác thực bên dưới.
+
+#### Relay restrictions — "hàng rào" thật sự, đọc từ trái sang phải
+
+```bash
+smtpd_relay_restrictions = permit_mynetworks,
+                           permit_sasl_authenticated,
+                           reject_unauth_destination
+```
+
+Đây là **mặc định của Postfix 3.x trên Ubuntu** (các bản cũ dùng `smtpd_recipient_restrictions`, vẫn hiểu tương tự nhưng relay restrictions tách riêng từ 3.0): Postfix duyệt list theo thứ tự, gặp `permit` thì cho qua, gặp `reject` thì chặn; `reject_unauth_destination` là chốt chặn cuối — **không phải mạng tin cậy, không xác thực SMTP AUTH → không nhận chuyển tiếp**. Khi đọc mail server bị tố spam, hai việc đầu tiên: `postconf -n | grep -E 'mynetworks|relay_restrictions'` và thử chính `reject_unauth_destination` có nằm cuối list không (đứng trước `permit` vô tội vạ là hỏng).
+
+#### TLS: biến SMTP plaintext thành có mã hoá
+
+```bash
+smtpd_tls_cert_file = /etc/ssl/certs/ssl-cert-snakeoil.pem   # cert cho EHLO STARTTLS
+smtpd_tls_key_file  = /etc/ssl/private/ssl-cert-snakeoil.key
+smtpd_tls_security_level = may    # opportunistic; `encrypt` = bắt buộc TLS (RFC 8314
+                                  # khuyến nghị TLS cho mọi kết nối mail client-facing)
+```
+
+Cùng cặp khoá, cấu hình cho **submission**: bật/hai service trong `master.cf` — `submission` (port **587**, RFC 6409 — cổng cho *client gửi mail*, luôn đòi AUTH + TLS) và `smtps` (port **465**, SMTP-over-TLS "implicit"; từng bị bỏ rơi nay được RFC 8314 công nhận lại). Trên `master.cf` mỗi service có thể override riêng, ví dụ `submission` gán `-o smtpd_tls_security_level=encrypt -o smtpd_sasl_auth_enable=yes`.
+
+#### Delivery cục bộ và hàng đợi
+
+- `mailbox_command` (mặc định để trống → Postfix tự deliver) có thể trỏ về **Dovecot LMTP/delivery** để thống nhất một "người giữ hòm thư" — xem 3a.5.
+- `mailbox_size_limit` (default **51200000 byte ≈ 50MB** — kiểm chứng bằng `postconf -d | grep mailbox_size_limit`): chặn "mail bomb" làm đầy `/var/spool/mail` và filesystem. Khác với `message_size_limit` (chặn ngay ở bước RCPT, mặc định ~10MB), `mailbox_size_limit` chỉ phát hiện lúc **giao thư tại chỗ** — mail vượt ngưỡng bị local/LMTP từ chối và bounce chứ không reject từ xa.
+- **Hàng đợi (queue):** mail chưa đi được nằm trong `/var/spool/postfix/{active,deferred,incoming}`. Công cụ quan sát: `postqueue -p` (liệt kê, xem status/bounce reason), `postqueue -f` (ép thử lại), `postsuper -d <queue_id>` (xoá mail kẹt), `postsuper -d ALL deferred` (dọn bão bounce — dùng thận trọng, trong lab).
+- Mail người dùng cuối: `~/Maildir` hoặc `/var/spool/mail/<user>` (mbox) — cùng tệp mà Dovecot sẽ đọc.
+
+#### Log
+
+Toàn bộ hoạt động mail vào facility `mail`/`auth` → **`/var/log/mail.log`** (`tail -f mail.log` khi test là phản xạ bắt buộc), kèm syslog id (`syslog_name`). Mỗi bước SMTP hiện nguyên: `connect from ...`, `client-hello`, `to=<rcpt>, relay=..., delay=..., status=sent/deferred/bounced` — status line này là chuỗi "evidence" đẹp nhất để dạy về hành vi relay.
+
+```bash
+postconf -n                    # dump cấu hình hiệu dụng
+ss -tlnp | grep -E ':(25|465|587)\b'   # Postfix listen cổng nào qua master.cf
+systemctl status postfix && systemctl reload postfix
+```
+
+**Nguồn:** https://www.postfix.org/BASIC_CONFIGURATION_README.html — https://www.postfix.org/postconf.5.html (định nghĩa từng tham số, gồm `mynetworks`, `smtpd_relay_restrictions`) — https://www.postfix.org/SASL_README.html — RFC 5321 (SMTP), RFC 6409 (submission), RFC 8314 (TLS cho mail — https://www.rfc-editor.org/rfc/rfc8314).
+
+---
+
+### 3a.4 Dovecot — Mail Retrieval Agent (POP3/IMAP) và "ngân hàng mật khẩu" của cả hệ thống
+
+#### Vai trò kép
+
+Dovecot không chỉ là server **IMAP (143/993) và POP3 (110/995)** để user kéo mail về; nó còn là **auth server dùng chung**: Postfix "hỏi" Dovecot "đúng mật khẩu này không" qua SASL socket (mục 3a.5). Nói Dovecot là thành phần bảo mật *tập trung* nhất của stack mail là không ngoa.
+
+**CẢNH BÁO phiên bản — phát hiện khi nghiên cứu cho chương này:** trên **Ubuntu 26.04 LTS, Dovecot được đóng gói ở dòng 2.4** (nguồn: Ubuntu Discourse warning + Launchpad changelog), và **file cấu hình 2.3 hoàn toàn không tương thích 2.4**: dòng đầu `dovecot.conf` phải là `dovecot_config_version`, các tên setting trong `conf.d/` đã đổi/di dời; service 2.4 sẽ **từ chối khởi động** nếu đọc cấu hình 2.3 cũ. Nội dung tiếp theo mô tả cấu trúc **2.3 (Ubuntu 24.04)** — khi làm trên 26.04, dùng `doveconf -n` để đối chiếu và xem hướng dẫn upgrade chính thức (link Nguồn bên dưới).
+
+#### Cấu trúc đánh số: `/etc/dovecot/conf.d/`
+
+Dovecot dùng `!include conf.d/*.conf`, đọc theo thứ tự tên file số — quy tắc "số to thắng số nhỏ". Các file quan trọng:
+
+- **`10-auth.conf`** — xác thực. `disable_plaintext_auth = yes` (mặc định an toàn của Dovecot): **từ chối cơ chế LOGIN/PLAIN khi kênh chưa có TLS** → chặn password dạng rõ (plaintext) bay trên mạng; chỉ nới `= no` cho kết nối từ loopback. `auth_mechanisms = plain login` quyết định Postfix sẽ được phép "đại diện" xác thực bằng cơ chế nào (thêm `gssapi`/`scram-sha-256`... tuỳ môi trường).
+- **`10-mail.conf`** — nơi hòm thư nằm: `mail_location = maildir:~/Maildir` (thư mục riêng, mỗi mail một file — an toàn khi đồng thời nhiều reader, và là kiểu Dovecot khuyến nghị) vs `mbox:~/mail:INBOX=/var/spool/mail/%u` (một file to, lock khi đọc — dễ deadlock, chậm với mailbox lớn; trên 2.4, `mail_location` bị **bỏ hẳn**, tách thành `mail_driver`/`mail_path`/`mail_inbox_path` và driver mbox bị đóng băng — không phát triển thêm). Cùng file này đặt `mail_privileged_group = mail` (quyền đọc `/var/spool/mail`).
+- **`10-master.conf`** — khai báo port/process mỗi service (`service imap-login`, `service pop3-login`: `inet_listener imap { port = 143 }`, `inet_listener imaps { port = 993 }`...). **Đây cũng là nơi mở socket SASL cho Postfix** (`unix_listener /var/spool/postfix/private/auth { mode = 0660 user = postfix group = postfix }`) — đặt quyền đúng để process `postfix:smtpd` đọc được mà user thường không đọc/ghi được.
+- **`10-ssl.conf`** — `ssl = required` (ép TLS cho mọi login), `ssl_cert`/`ssl_key`, `ssl_min_protocol = TLSv1.2`, danh sách `ssl_protocols`. POP3/IMAP mặc định plaintext → TLS qua STARTTLS cùng cổng (143/110) hoặc cổng TLS-khép kín riêng (993/995). Đây là tham số biến "rò mật khẩu khi user check mail ở quán cà phê" thành bất khả thi về mặt nghe lén.
+- `auth-passwdfile.conf.ext`, `passdb`/`userdb`: nguồn mật khẩu — hệ thống (`passdb { driver = pam }`, mặc định trong gói distro) hoặc file riêng của Dovecot (`driver = passwd-file`, trỏ tới file dạng `user:{SHA512-CRYPT}hash`).
+
+Khái niệm **namespace INBOX**: hòm thư "đến" chuẩn (`mail_location` + namespace default INBOX) — hiểu nó để biết vì sao Postfix LMTP ghi vào đâu thì Dovecot đọc từ đó.
+
+**LMTP (Local Mail Delivery Agent):** thay vì Postfix tự ghi hòm thư, chuyển `mailbox_command`/`transport` sang Dovecot qua **`service lmtp`** (unix socket hoặc `inet_listener lmtp { port = 24 }` trong cùng `10-master.conf`). Lợi ích: một chỗ duy nhất quyết định quota, sieve filter, format maildir; Dovecot wiki/doc gọi đây là bài toán của stack tích hợp.
+
+Chẩn đoán nhanh bằng công cụ của chính Dovecot:
+
+```bash
+doveconf -n          # dump cấu hình HIỆU DỤNG (sau khi merge conf.d) — dùng khi audit
+doveadm auth test kim "matkhau"   # (trong lab) hỏi thẳng passdb: đúng/sai?
+ss -tlnp | grep -E ':(110|143|993|995)\b'
+systemctl reload dovecot     # sau khi sửa conf.d; systemctl restart khi đổi passdb
+```
+
+**Nguồn:** https://doc.dovecot.org/2.3/configuration_manual/ (bản archive không còn được maintain — Dovecot gắn cảnh báo rõ trên trang) — https://doc.dovecot.org/main/howto/sasl/postfix.html ("Postfix with Dovecot SASL", hướng dẫn tích hợp Postfix↔Dovecot) — https://doc.dovecot.org/main/installation/upgrade/2.3-to-2.4.html — https://discourse.ubuntu.com/t/warning-dovecot-2-4-incompatible-with-2-3-config-files/68786 — https://launchpad.net/ubuntu/+source/dovecot/+changelog — RFC 9051 (IMAP4rev2, thay 3501), RFC 1939 (POP3), RFC 2033 (LMTP) — https://www.rfc-editor.org/standards.
+
+---
+
+### 3a.5 Mối liên kết giữa bốn thành phần: ai giữ user, ai nói với ai
+
+Đây là phần dễ bị bỏ qua nhưng trả lời câu hỏi "vì sao đổi mật khẩu chỗ nào đó mà ba dịch vụ cùng ảnh hưởng".
+
+#### Sơ đồ luồng trên một máy Ubuntu Server
+
+```
+                    ┌──────────────────────── systemd ────────────────────────┐
+Client FTPES ─:21──▶│ vsftpd ──(PAM: /etc/pam.d/vsftpd)──▶ /etc/shadow        │
+Client SFTP  ─:22──▶│ sshd  ──(subsystem internal-sftp)──▶ /etc/shadow        │
+Client SMTP ─:25/587▶ Postfix smtpd ──(SASL qua unix socket)──┐               │
+                                                              ▼               │
+                                                    Dovecot auth (passdb)     │
+Client POP3/IMAP :110/143/993/995 ─────────────────────────▶ Dovecot login    │
+                                                              │ mail_location ▼
+                                     Postfix LMTP ───────────▶│  Maildir /var/spool/mail │
+                    └──────────────────────────────────────────────────────────────────┘
+```
+
+- **Chủ quyền tài khoản:** vsftpd và sshd **đều không giữ mật khẩu riêng** — cả hai xác thực qua PAM/`/etc/shadow` (trên Ubuntu 24.04+ có thể là yescrypt). Dovecot mặc định (`passdb { driver = pam }` hoặc `system`) cũng đọc cùng nguồn. Vì vậy **một user Linux = login được cả ba**, và `userdel`/khoá account (`passwd -l`) cắt luôn FTP/SFTP/IMAP — đó là điểm kiểm soát tập trung, cũng là điểm khuếch đại rủi ro.
+- **Postfix gửi câu hỏi xác thực cho Dovecot:** trong `main.cf`, `smtpd_sasl_type = dovecot` + `smtpd_sasl_path = private/auth` khiến Postfix không tự verify password mà **kết nối tới unix socket do Dovecot tạo trong `10-master.conf`** (`/var/spool/postfix/private/auth`, mode 0660 user/group `postfix`). Người dùng SMTP AUTH vì thế dùng đúng mật khẩu IMAP — không có "database thứ hai" để lệch. Socket nằm trong **chroot của Postfix** (`/var/spool/postfix`) — đặt sai đường dẫn là triệu chứng "AUTH không xuất hiện trong EHLO".
+- **Chuỗi delivery:** Postfix nhận → (quyết định local hay relay) → chuyển cho Dovecot qua **LMTP** hoặc tự ghi; Dovecot serve POP3/IMAP đọc cùng thư mục theo `mail_location`.
+- **Góc systemd:** mỗi service là một unit (`vsftpd`, `ssh`, `postfix`, `dovecot`) — độc lập restart/reload, và `journalctl -u <dịch vụ>` cho log chuẩn hoá. Kiểm tra trạng thái tổng: `systemctl status vsftpd ssh postfix dovecot --no-pager`.
+
+#### Ví dụ xuyên suốt một hành vi
+
+Alice upload web-shell qua FTPES bằng account của cô (vsftpd → PAM → `/etc/shadow`), trong lúc Carol gửi spam qua `:587` (Postfix → socket Dovecot → **cùng passdb**). Khi điều tra: `mail.log` chỉ ra Alice? Không — chỉ ra Carol; `auth.log` ghi SSH của cả hai; muốn đóng Carol khỏi *mọi* dịch vụ cùng lúc: khoá tài khoản Linux — và vì sao **phải audit cả `/etc/ftpusers` + whitelist vsftpd**, bởi "chủ quyền tập trung" nghĩa là một account bị lộ là ba mặt trận bị lộ.
+
+#### Checklist quan sát nhanh trong lab
+
+```bash
+ss -tlnp | grep -E ':(21|22|25|110|143|465|587|993|995)\b'   # dịch vụ nào đang thật sự bật
+postconf -n; doveconf -n; sshd -T | head; grep -vE '^(#|$)' /etc/vsftpd.conf
+journalctl -u postfix -u dovecot -u vsftpd -u ssh --since "10 min ago"
+```
+
+Ghi nhớ điều xuyên suốt chương: **mỗi tham số đã học ở trên đều biến thành một dòng có thể grep, một cổng có thể `ss`, và một sự kiện có thể log** — đó là ba kênh (cấu hình — mạng — nhật ký) để "phát hiện sớm" ở các chương sau khai thác.
+
+---
+
+*Tài liệu chỉ dùng cho mục đích học tập & phòng thủ trong lab riêng của nhóm; mọi nội dung liên quan brute force, open relay hay escape chroot được trình bày ở mức "vì sao nó xảy ra", không phải hướng dẫn khai thác hệ thống thật.*
+
+---
+
+## 3b. Công cụ phía client và giám sát: FileZilla, Thunderbird, Wireshark, UFW, Fail2ban, nhật ký hệ thống
+
+Chương 3a đã trình bày cách cài đặt và cấu hình các server FTP/FTPS/SFTP, SMTP (Postfix), POP3/IMAP (Dovecot). Chương 3b này hoàn thiện bức tranh "lab A" của đồ án bằng các công cụ mà người quản trị (administrator) thực sự dùng hằng ngày: client để kết nối (FileZilla, Thunderbird), công cụ quan sát gói tin (Wireshark), tường lửa (UFW), công cụ chống brute-force (Fail2ban) và hệ thống nhật ký (logging). Mỗi mục trình bày theo ba tầng: **bản chất** → **ví dụ cấu hình** → **cách quan sát trong lab**.
+
+> **Phạm vi đạo đức — nhắc lại:** mọi phép thử trong chương này (capture gói tin, đăng nhập sai nhiều lần để kích hoạt Fail2ban, quét port...) chỉ thực hiện trên **mạng lab riêng do nhóm sở hữu** (VM nội bộ, không định tuyến ra Internet công cộng). Việc capture mạng của người khác hoặc của hệ thống không thuộc quyền sở hữu là vi phạm pháp luật (ở Việt Nam: Luật An toàn thông tin mạng 2015, Bộ luật Hình sự 2015).
+
+---
+
+### 3b.1. FileZilla — client FTP/FTPS/SFTP đa giao thức
+
+#### 3b.1.1. Bản chất: một client, ba giao thức khác nhau
+
+FileZilla là mã nguồn mở, chạy được trên Windows/Linux/macOS, hỗ trợ ba giao thức mà đồ án nghiên cứu:
+
+| Giao thức | Bản chất | Port mặc định | Có mã hóa? |
+|---|---|---|---|
+| FTP (RFC 959) | Điều khiển + dữ liệu tách hai kênh TCP | 21 (command) | Không — mật khẩu đi dạng rõ (cleartext) |
+| FTPS (RFC 4217) | FTP + TLS; "explicit" = bắt đầu trên port 21 rồi nâng cấp bằng lệnh `AUTH TLS` | 21 hoặc 990 ("implicit", đã lỗi thời) | Có (toàn bộ phiên sau handshake) |
+| SFTP | Giao thức file chạy "trên" SSH (không liên quan FTP!), chuẩn của IETF từng là draft-ietf-secsh-filexfer, nay do OpenSSH duy trì | 22 | Có (từ gói tin đầu tiên) |
+
+Điểm hay bị nhầm nhất: **SFTP không phải "FTP qua SSH" theo nghĩa FTP được bọc**; nó là một giao thức hoàn toàn khác, chỉ "đi ké" kênh SSH đã xác thực và mã hóa sẵn. Vì vậy khi dựng lab, mở port 22 là đủ cho SFTP — không cần mở port 21.
+
+#### 3b.1.2. Site Manager: các mục cần hiểu khi cấu hình
+
+Trong FileZilla, mở **File → Site Manager → New site**. Các trường quan trọng:
+
+- **Protocol**: chọn *FTP - File Transfer Protocol*, *SFTP - SSH File Transfer Protocol*, hoặc *FTPS - FTP over TLS*.
+- **Encryption** (chỉ hiện khi Protocol = FTP/FTPS) — đây là nơi thể hiện rõ nhất quan điểm bảo mật:
+  - *Only use plain FTP (insecure)*: **không mã hóa gì cả** — chỉ dùng trong lab demo để sinh viên **chứng minh** mật khẩu bị nghe lén được (xem 3b.3.4). Ngoài lab: cấm dùng.
+  - *Require explicit FTP over TLS*: kết nối mở trên port 21 ở dạng clear-text, sau đó client gửi `AUTH TLS` để nâng cấp lên TLS trước khi gửi bất kỳ thông tin đăng nhập nào. Đây là lựa chọn đúng cho FTPS kiểu explicit (RFC 4217).
+  - *Require FTP over TLS if available*: tự động thử TLS nhưng **im lặng quay về plain FTP nếu server không hỗ trợ** — nguy hiểm hơn vì kẻ tấn công có thể cắt TLS (strip) và client vẫn đăng nhập, lộ mật khẩu.
+  - *Require interactive FTP over TLS*: như trên nhưng dừng lại hỏi người dùng — an toàn hơn khi muốn chủ động.
+- **Logon Type**: *Normal* (khai báo user/pass), *Interactive* (nhập tay từng lần), *Key file* (SFTP dùng khóa SSH — khi đó trường User có thể để trống nếu key đã chỉ định danh tính).
+- **Servertype**: thường để *Default* để FileZilla tự thăm dò (gửi lệnh `SYST`). Chỉ chọn tường minh (UNIX, FTP over TLS capable server...) khi server cố tình ẩn danh `SYST` và autoscan không nhận ra.
+- **Passive mode** (tab Transfer Settings): FTP cần một kênh TCP thứ hai cho dữ liệu. *Passive (PASV)*: client chủ động kết nối đến port dữ liệu do server chỉ định — **khuyến nghị** khi client đứng sau NAT/firewall. *Active (PORT)*: server gọi ngược về client — thường bị firewall phía client chặn. Trong lab, nếu kết nối được 21 nhưng `LIST` treo → tích cực chuyển sang PASV.
+
+Mẫu một site lab đọc được từ giao thức (chỉ để demo):
+
+```text
+Host: 192.168.56.10   # IP "host-only" của VM server trong VirtualBox/VMware
+Port: 21              # explicit FTPS
+Protocol: FTP
+Encryption: Require explicit FTP over TLS
+Logon Type: Normal
+User: ftpuser         # tài khoản ảo trong /etc/vsftpd passwd file của lab
+```
+
+#### 3b.1.3. Log window của FileZilla và cách đọc
+
+Khung dưới cùng (Message window) ghi lại **từng dòng trao đổi giao thức**, là tài liệu học liệu tốt nhất cho người mới. Ví dụ đọc một kết nối plain FTP:
+
+```text
+Command: USER ftpuser
+Response: 331 Please specify the password.   # server đồng ý cho nhập mật khẩu
+Command: PASS ********                        # FileZilla che mask khi hiển thị...
+Status: Connection established...              # ...nhưng trên wire thì KHÔNG che
+```
+
+Quy tắc đọc response code FTP (RFC 959): nhóm `1xx/2xx` = thành công/tạm chấp nhận, `3xx` = cần thêm thông tin (331 chờ PASS), `4xx` = lỗi tạm thời, `5xx` = lỗi vĩnh viễn (530 = đăng nhập sai). Với SFTP, log window hiện các dòng `Status: Remote directory: ...` và tiến trình từng file — không có lệnh FTP nào xuất hiện, vì SFTP dùng giao thức riêng.
+
+**Quan sát trong lab:** bật *Debug → Output debug information* rồi so sánh log của cùng một thao tác upload qua (a) plain FTP, (b) explicit FTPS, (c) SFTP — thấy ngay khác biệt handshake và cảnh báo chứng chỉ.
+
+Nguồn:
+- FileZilla wiki (hướng dẫn Site Manager / Encryption): https://wiki.filezilla-project.org/
+- RFC 959 (FTP): https://www.rfc-editor.org/rfc/rfc959 — cập nhật thành STD 9 bởi RFC 959 (2024, thay RFC 1123 phần FTP)
+- RFC 4217 (FTP over TLS): https://datatracker.ietf.org/doc/html/rfc4217
+
+---
+
+### 3b.2. Thunderbird — client thư đồng thời là "máy tạo bằng chứng" TLS
+
+#### 3b.2.1. Wizard tự động: ISP DB và autoconfig
+
+Thunderbird liên kết một tài khoản thư gần như "tự động". Quy trình phát hiện (autoconfiguration) theo tài liệu Mozilla:
+
+1. Tra **ISPDB** (Internet Service Provider Database) của Mozilla tại `https://autoconfig.thunderbird.net/v1.1/<domain>`.
+2. Không thấy → thăm dò các URL "well-known" trên chính hạ tầng của nhà cung cấp: `https://<domain>/.well-known/autoconfig/mail/config-v1.1.htm` và `http://autoconfig.<domain>/mail/config-v1.1.xml` (tên host theo chuẩn `autoconfig.<domain>` hoặc cấu hình qua bản ghi DNS `_automx`).
+3. Không thấy tiếp → đoán cổng theo tập hợp heuristic chuẩn (imap/993 SSL, smtp/465 hoặc 587...).
+
+Kết quả là một file XML mô tả hostname, port, socketType (`SSL` = implicit TLS, `STARTTLS` = nâng cấp, `plain` = không mã hóa) và method xác thực. **Với lab của đồ án**, server mail nội bộ không có tên DNS công khai nên wizard sẽ thất bại — chuyển sang cấu hình tay, hoặc (nâng cao) nhóm tự phục vụ file `config-v1.1.xml` để mô phỏng một ISP thật.
+
+#### 3b.2.2. Manual config: chọn giao thức và mã hóa
+
+Account Settings → Account Actions → Add Mail Account → *Configure manually*:
+
+- Nhận/Incoming: **IMAP** (khuyến nghị — mail đồng bộ 2 chiều trên server, các thao tác đọc/xóa/label phản ánh trạng thái server) hoặc **POP3** (tải về một chiều, lịch sử nằm ở client).
+- Outgoing: **SMTP**.
+- Mục *Connection security* có ba lựa chọn, tương ứng ba mức rủi ro:
+  - **SSL/TLS**: bắt đầu TLS ngay từ gói đầu tiên → cổng 993 (IMAPS), 995 (POP3S), 465 (SMTPS/submission-tunnel).
+  - **STARTTLS**: kết nối clear-text rồi nâng cấp → cổng 143 (IMAP), 110 (POP3), 25/587 (SMTP; 587 là cổng "submission" theo RFC 6409, bắt buộc xác thực, khuyến nghị cho client).
+  - **None**: chỉ dùng để lab **chứng minh mật khẩu lộ trên wire** (xem Wireshark bên dưới). Thunderbird hiện chữ "Not recommended" bằng đỏ và xác nhận hai lần trước khi cho phép — thiết kế "đánh thức" người dùng.
+- **Cổng tự đổi khi chọn loại mã hóa**: chọn SSL/TLS thì trường Port tự nhảy sang 993/995/465; chọn None về 143/110/25. Đây là manh mối để sinh viên đoán "server này đang phục vụ kiểu gì" chỉ bằng cách nhìn cấu hình client.
+
+Bảng cổng tham chiếu nhanh cho lab:
+
+| Dịch vụ | Clear-text | Implicit TLS (SSL) | STARTTLS |
+|---|---|---|---|
+| IMAP | 143 | 993 | 143 |
+| POP3 | 110 | 995 | 110 |
+| SMTP (submit) | 25/587 | 465 | 587 |
+
+#### 3b.2.3. Profile và nơi lưu mật khẩu
+
+Hồ sơ (profile) Thunderbird chứa toàn bộ mail đã cache, danh bạ và file `logins.json` (mật khẩu). Nơi lưu (Linux): `~/.thunderbird/<random>.default-release/`; Windows: `%APPDATA%\Thunderbird\Profiles\`. Mặc định mật khẩu được mã hóa bằng khóa nằm trong `key4.db`; nếu **không đặt Master Password** thì `key4.db` nằm ngay trên đĩa và bất kỳ ai đọc được profile đều giải được mật khẩu (Firefox/Thunderbird đã ngừng dùng tên file cũ `cert8.db`/`key3.db` từ các bản nhiều năm trước).
+
+- **Master Password** (Preferences → Privacy → Passwords → Use a Primary Password): thêm một lớp khóa đối xứng — `key4.db` trở nên vô dụng nếu không có mật khẩu chính. Khuyến nghị bật cho mọi máy thật.
+- Trên Linux bản tích hợp, Thunderbird có thể dùng **OS password manager** (GNOME Keyring/kwallet) thay cho `logins.json`.
+
+**Thí nghiệm lab:** copy thư mục profile sang máy khác, mở Thunderbird bằng bản portable → email tự đăng nhập mà không hỏi mật khẩu → chính là lý do phải bật Master Password.
+
+#### 3b.2.4. SSLKEYLOGFILE: xuất khóa TLS để giải mã trong Wireshark (kỹ thuật chủ lực của lab A)
+
+Thunderbird (như Firefox) dùng thư viện **NSS**, vốn hỗ trợ chuẩn *NSS Key Log Format*: nếu biến môi trường `SSLKEYLOGFILE` trỏ tới một đường dẫn, mọi phiên TLS mới do ứng dụng khởi tạo sẽ được ghi **khóa bí mật phiên (session keys)** vào file đó dưới dạng văn bản:
+
+```text
+CLIENT_RANDOM 7a3f...e91b 4d2c...f0a7   # mỗi dòng: nhãn + client-random + khóa
+```
+
+Cách làm trên Linux (GUI launcher thường KHÔNG kế thừa biến môi trường → phải chạy từ shell):
+
+```bash
+export SSLKEYLOGFILE="$HOME/sslkey.log"   # đặt TRƯỚC khi khởi động Thunderbird
+thunderbird &                              # phiên cũ đang chạy phải tắt hẳn trước
+```
+
+Windows: đặt biến trong *System → Environment Variables* cho user, khởi động lại Thunderbird. Lưu ý Mozilla **cố ý hiển thị cảnh báo bảo mật** khi phát hiện `SSLKEYLOGFILE` đang bật — vì file key log + pcap = đọc được toàn bộ mail đã "mã hóa"; đây đúng là điểm dạy học của kỹ thuật. Sau đó nạp file vào Wireshark (xem 3b.3.5).
+
+Không cần mở Security Device Manager theo cách thủ công: với Thunderbird/NSS, `SSLKEYLOGFILE` là con đường chuẩn và được tài liệu chính thức xác nhận. Nếu cần chọn/xóa thiết bị lưu chứng chỉ, *Preferences → Settings → Encryption → Devices → Security Device Manager* (nơi quản lý token PKCS#11 và key4.db).
+
+Nguồn:
+- Thunderbird Autoconfiguration spec: https://wiki.mozilla.org/Thunderbird:Autoconfiguration và https://wiki.mozilla.org/Thunderbird:Autoconfiguration:ConfigFileFormat
+- ISPDB GitHub: https://github.com/thunderbird/autoconfig
+- NSS Key Log Format: https://nss-crypto.org/reference/security/nss/legacy/key_log_format/index.html
+- Mozilla về SSLKEYLOGFILE: https://support.mozilla.org/en-US/kb/automatic-account-configuration , https://support.mozilla.org/en-US/kb/sslkeylogfile-warning
+- RFC 6409 (Message Submission): https://www.rfc-editor.org/rfc/rfc6409
+
+---
+
+### 3b.3. Wireshark — "tai mắt" của quản trị và của kẻ tấn công
+
+#### 3b.3.1. Nguyên lý capture: vì sao không phải lúc nào cũng "bắt được"
+
+Wireshark dựa trên thư viện **libpcap** (Linux/macOS) hoặc **Npcap** (Windows) để nhận bản sao mọi khung tin đi qua card mạng. Hai điều kiện vật lý quyết định capture có thu được lưu lượng của máy khác không:
+
+- **Promiscuous mode** (chế độ lẫn lộn): card mạng nhận cả khung không dành cho mình. Mặc định card chỉ nhận khung có đúng MAC đích. Khi bật bằng `ip link set <iface> promisc on` (hoặc chọn trong Wireshark), mới mong thấy traffic "quá cảnh".
+- **Hub vs Switch**: mạng hub (thiết bị lớp 1) phát broadcast mọi cổng → promiscuous mode bắt được hết. Switch hiện đại chỉ gửi khung đến đúng cổng đích → muốn "nghe lén" phải dùng **port mirroring/SPAN** trên switch, hoặc ARP spoofing (chỉ đề cập mức tồn tại, nằm ngoài phạm vi lab phòng thủ của đồ án). **Vì vậy trong lab dùng mạng host-only/internal của VirtualBox/VMware, capture trên adapter của máy "trung tâm" hoặc ngay trên máy client/server là hợp lệ và an toàn** — không ảnh hưởng mạng thật bên ngoài.
+
+#### 3b.3.2. Capture filter (BPF) vs Display filter — đừng nhầm
+
+| | Capture filter (BPF) | Display filter |
+|---|---|---|
+| Chạy khi nào | Lúc ghi gói — quyết định gói nào được GIỮ lại | Lúc xem — chỉ ẩn/hiện trên giao diện |
+| Vị trí đặt | Ô "Filter" của capture box | Thanh "Display filter" đầu cửa sổ |
+| Cú pháp | `tcp port 21 or tcp port 25 or tcp port 110 or tcp port 143` | `ftp \|\| smtp \|\| pop \|\| imap` |
+| Hệ quả dùng sai | Lọc luôn → không "hồi cứu" được gói đã bỏ | Đã capture đủ → đổi filter thoải mái |
+
+Mẹo lab: capture với bộ BPF rộng `tcp port 20 || tcp port 21 || tcp port 25 || tcp port 110 || tcp port 143 || tcp port 465 || tcp port 587 || tcp port 990 || tcp port 993 || tcp port 995`, rồi dùng display filter để điều hướng.
+
+#### 3b.3.3. Follow TCP Stream và bằng chứng cleartext
+
+Chuột phải một gói FTP → **Follow → Follow TCP Stream** mở nguyên đoạn hội thoại dạng văn bản:
+
+```text
+USER ftpuser
+PASS MatKhauLab2026!        # ← đọc nguyên văn: bằng chứng plain FTP không an toàn
+...
++OK Logged in.               # (tương tự với POP3; SMTP: 235 Authentication successful)
+```
+
+Cùng thao tác trên stream IMAP/POP3/SMTP ở chế độ None/STARTTLS-trước-nâng-cấp cũng cho kết quả tương tự với `LOGIN`/`AUTH LOGIN` (AUTH LOGIN chỉ là base64, **không phải mã hóa** — ai cũng giải được). Đây là slide "khoảnh khắc giác ngộ" trong báo cáo đồ án.
+
+#### 3b.3.4. Decode As
+
+Wireshark tự nhận diện giao thức theo cổng quen thuộc. Khi server lab chạy ở cổng lạ (SMTP trên 2525, FTPS-control trên 2121...), chọn gói → Analyze → **Decode As** → ép cột *Current* sang `FTP`/`SMTP`/`IMAP`/`POP`. Đặc biệt với **implicit TLS trên cổng không chuẩn** (SMTPS 2465...), phân tích vẫn đúng nếu decode là TLS rồi bật giải mã (mục sau).
+
+#### 3b.3.5. Giải mã FTPS/SMTP-TLS để CHỨNG MINH "không đọc được nội dung nữa"
+
+Đây là thí nghiệm đối chứng của 3b.3.3, dùng chính key log của Thunderbird/FileZilla:
+
+1. Mở `SSLKEYLOGFILE` (Thunderbird — xem 3b.2.4; FileZilla từ bản mới cũng ghi key log khi bật debug, hoặc dùng trình khác cùng NSS/OpenSSL).
+2. Capture phiên IMAPS/STARTTLS SMTP.
+3. Wireshark: **Edit → Preferences → Protocols → TLS → (Pre)-Master-Secret log filename** → trỏ tới file key log.
+4. Kết quả: các record TLS biến thành giao thức gốc (IMAP, SMTP) **đã giải mã** — nhóm thấy lệnh và cả... không có gì lộ nếu lab dùng đúng. Đối chứng: **SFTP thì hoàn toàn vô vọng** — SFTP nằm trong kênh SSH đã mã hóa, không phải TLS; bắt được cũng chỉ là các gói `SSH-2.0` binary, không có cơ chế key-log tương ứng trong các bước trên → bằng chứng trực quan rằng SFTP "đóng kín" hơn FTPS/STARTTLS ở mặt bị nghe lén chủ động.
+
+Lưu ý kỹ thuật: key log chỉ ghi được nếu file tồn tại **trước khi** handshake diễn ra, và bắt buộc phải capture thấy đủ ClientHello; riêng FTPS dữ liệu (kênh data trên port ngẫu nhiên theo PASV) phải decode as TLS từng kênh.
+
+**Ràng buộc pháp lý/đạo đức:** capture phải có sự đồng ý của chủ mạng và chỉ trên mạng lab; key log chứa khóa phiên plaintext = "chìa khóa phòng", phải lưu/dọn như mật khẩu, không commit vào repo báo cáo.
+
+Nguồn:
+- Wireshark capture/filter: https://www.wireshark.org/docs/ , https://wiki.wireshark.org/TLS , https://wiki.wireshark.org/SMTP
+- Display filter syntax: https://www.wireshark.org/docs/wsug_html_chunked/ChWorkBuildDisplayFilterSection.html
+
+---
+
+### 3b.4. UFW — tường lửa đơn giản hóa iptables/nftables
+
+#### 3b.4.1. Bản chất
+
+**UFW (Uncomplicated Firewall)** là front-end cho iptables (hoặc nftables — Ubuntu 24.04 về sau mặc định dùng `nf_tables` backend khi kernel hỗ trợ, tra trong `/etc/default/ufw` dòng `IPTABLES=...`). Mục tiêu: đổi câu lệnh iptables dài dòng thành ngữ pháp người-lành-thao-tác. Mọi rule UFW cuối cùng vẫn là chain `ufw-user-input`/`ufw-after-*` trong bảng filter — nên có thể đọc chéo giữa `ufw status` và `iptables -S`.
+
+#### 3b.4.2. Lệnh nền tảng
+
+```bash
+sudo ufw status verbose   # xem trạng thái + rule kèm policy mặc định (VERBOSE hiện cả log level)
+sudo ufw default deny incoming   # mặc định CHẶN mọi chiều vào — nền tảng của "zero-trust lab"
+sudo ufw default allow outgoing  # cho phép chiều ra (client cần ra ngoài)
+sudo ufw allow 21/tcp     # mở FTP control cho lab
+sudo ufw allow 20/tcp     # active-mode data (bỏ nếu lab luôn PASV)
+sudo ufw allow 30000:31000/tcp  # dải passive ports phải KHỚP với pasv_min/max_port trong vsftpd.conf
+sudo ufw allow from 192.168.56.0/24 to any port 22 proto tcp comment 'SSH - chi mang lab'
+sudo ufw limit 22/tcp     # "limit": cho phép nhưng chặn nếu >5 kết nối/30s (tự thêm rule rate-limit)
+sudo ufw delete allow 21/tcp   # xóa rule bằng chính cú pháp đã thêm
+sudo ufw enable / disable
+```
+
+Nguyên tắc quản trị SSH: **không bao giờ `allow 22/tcp` rộng cho 0.0.0.0/0 trên máy có IP công khai**; giới hạn theo source IP của ban quản trị (như mẫu trên) hoặc đặt SSH ở cổng đổi + key-only auth (thuộc chương SSH).
+
+#### 3b.4.3. File cấu hình và chiến lược rule cho lab
+
+- `/etc/default/ufw` — cấu hình toàn cục: `DEFAULT_INPUT_POLICY="DROP"`, `IPTABLES=...` (chọn backend), `ENABLED=yes/no`.
+- `/etc/ufw/before.rules` / `after.rules` — chèn iptables thủ công UFW không diễn đạt được (VD: cấu hình MASQUERADE cho VM gateway).
+- `/etc/ufw/sysctl.conf` — kernel params khi bật (`nf_conntrack_ftp` helper để "thấu hiểu" FTP data channel — FTP dạng này rất hay bị quên; không có helper thì PASV bị DROP giữa chừng dù đã allow 21).
+- `/etc/ufw/ufw.conf` — cờ bật/tắt khi boot.
+
+**Chiến lược lab đề xuất** (áp cho máy server 192.168.56.10): `default deny incoming` → chỉ allow đúng: 22 từ subnet lab (hoặc limit), 21 + dải PASV (nếu test FTP/FTPS), 25 (nếu mail server nhận thư nội bộ), 587, 143/993, 110/995, 22 (SFTP dùng lại nó). Mọi thứ khác đóng — kể cả khi service có bug thì attacker từ ngoài cũng không thấy cổng nào để đánh. Đây là lớp "reduce attack surface" bổ khuyết cho lớp Fail2ban (phát hiện hành vi) bên dưới.
+
+Nguồn: Ubuntu Server guide — PTF (firewalls): https://documentation.ubuntu.com/server/how-to/security/firewall-management/ ; man ufw: https://manpages.ubuntu.com/manpages/noble/man8/ufw.8.html (theo dõi bản LTS hiện hành — tính đến 8/2026 Ubuntu LTS mới nhất là 26.04 "Resolute Raccoon" (04/2026); lab nhóm có thể chạy 24.04 LTS, hỗ trợ tới 6/2029).
+
+---
+
+### 3b.5. Fail2ban — hàng rào chống brute-force dựa trên nhật ký
+
+#### 3b.5.1. Kiến trúc: jail / filter / action
+
+Fail2ban là **daemon đọc log**, đếm các dòng khớp regex "đăng nhập thất bại" theo từng nguồn IP, và khi vượt ngưỡng trong cửa sổ thời gian thì gọi một **action** (mặc định: chèn rule vào iptables/nftables để DROP/NẶNG hơn REJECT). Ba thành phần:
+
+- **Filter**: regex khớp các dòng thất bại (VD: `failregex = ...`).
+- **Jail**: đơn vị cấu hình ghép *một filter* + *một logpath* + *một action* + *các ngưỡng*, khai báo trong `jail.conf`/`jail.local`.
+- **Action**: lệnh firewall/SMTP thông báo... được thực thi khi ban.
+
+**Luật bất di bất dịch:** không bao giờ sửa `/etc/fail2ban/jail.conf` — file này bị **ghi đè mỗi lần cập nhật gói**. Mọi tùy biến vào `/etc/fail2ban/jail.local` (ghi đè từng section theo tên), và filter độ chế vào `filter.d/<ten>.local`.
+
+#### 3b.5.2. Các jail liên quan tới dịch vụ của đồ án (tên thật trên bản hiện hành)
+
+Trong `/etc/fail2ban/jail.conf`, tên section mặc định = tên filter: `[sshd]`, `[vsftpd]`, `[dovecot]`, `[postfix]`, `[recidive]`...
+
+- **vsftpd**: jail `[vsftpd]`, filter `filter.d/vsftpd.conf` (khớp `530 Login incorrect`).
+- **sshd**: `[sshd]`, filter `filter.d/sshd.conf` — dùng được cho cả SFTP vì xác thực SFTP = xác thực SSH.
+- **postfix**: bản fail2ban 0.10+ đã **gộp các filter cũ** (`postfix-sasl`, `postfix-smtpd`, `postfix-auth`) vào `filter.d/postfix.conf`; chỉ cần bật `[postfix]` với `mode = all` (bắt cả reject spam/RCPT) — lệnh `fail2ban-client status postfix-sasl` sẽ báo "does not exist" trên cài đặt mới.
+- **dovecot**: `[dovecot]`, filter `filter.d/dovecot.conf`; tài liệu Dovecot cũ từng nhắc tên `dovecot-pop3imap`, bản nay thay bằng `[dovecot]` (khuyến nghị `mode = aggressive` để bắt cả "user không tồn tại").
+- **recidive**: jail "ban lại những IP đã bị ban ≥ N lần" — hữu ích cho lab mô phỏng brute-force dai dẳng.
+
+Mẫu `/etc/fail2ban/jail.local` tối giản cho lab:
+
+```ini
+[DEFAULT]
+bantime  = 1h        # thời gian ban một IP vi phạm
+findtime = 10m       # cửa sổ thời gian đếm vi phạm
+maxretry = 5         # vượt ngưỡng này trong findtime => ban
+backend  = auto      # 'systemd' nếu distro chỉ ghi journald (VD vsftpd log qua journal);
+                     # polling khi log ghi ra file thường
+
+[sshd]
+enabled = true
+
+[vsftpd]
+enabled = true
+# logpath = /var/log/vsftpd.log  # BỎ khi backend=systemd: fail2ban tự đọc journal của unit vsftpd
+
+[postfix]
+enabled = true
+mode    = all
+
+[dovecot]
+enabled = true
+mode    = aggressive
+logpath = %(syslog_mail)s   # trỏ tới mail.log (chuẩn macro Debian/Ubuntu)
+
+[recidive]
+enabled = true
+```
+
+#### 3b.5.3. Tham số cốt lõi
+
+| Tham số | Ý nghĩa | Giá trị lab gợi ý |
+|---|---|---|
+| `findtime` | Cửa sổ thời gian gom vi phạm | `10m` |
+| `maxretry` | Số lần thất bại tối đa trong cửa sổ | `3` (lab dễ kích hoạt) / `5` (thực tế) |
+| `bantime` | Thời gian ban | `1h`; `-1` = vĩnh viễn |
+| `banaction` | Tên action (`/etc/fail2ban/action.d/`), mặc định `iptables-multiport` | đổi `nftables-multiport` nếu UFW dùng nftables backend |
+| `ignoreip` | IP miễn ban (luôn thêm IP máy test của nhóm!) | `127.0.0.1/8 192.168.56.1` |
+
+(Tham số `ipset`: ở hệ thống cài `ipset`, có thể dùng action `iptables-ipset-proto6` để ban qua **ipset** — một tập hợp IP tra cứu O(1) thay vì chèn hàng nghìn rule iptables; trên Ubuntu server mặc định dùng `iptables-multiport`.)
+
+#### 3b.5.4. Kiểm tra trong lab (quan trọng hơn cả cấu hình)
+
+```bash
+fail2ban-client status              # danh sách jail đang chạy
+fail2ban-client status sshd         # số ban hiện tại, IP nào đang bị ban, total banned
+fail2ban-regex /var/log/auth.log /etc/fail2ban/filter.d/sshd.conf --print-all-matched
+                                    # THỬ regex offline: đếm matched/failed mà không cần tấn công lại
+sudo journalctl -u fail2ban -f      # log hành vi của chính fail2ban
+```
+
+Quy trình test chuẩn của lab: mở 2 VM → từ VM attacker đăng nhập sai SSH/FTP ≥ `maxretry` lần (dùng `hydra`/`medusa` **chỉ ở mức nhắc đến: tồn tại, dùng được trong lab được phê duyệt**, không nêu cú pháp) → `fail2ban-client status sshd` hiện IP trong `Banned IP list` → `sudo ufw status`/`iptables -L -n` thấy rule DROP → lần kết nối tiếp theo treo/từ chối. Sau đó `fail2ban-client set sshd unbanip <IP>` để dọn.
+
+Nguồn:
+- Fail2ban GitHub (docs, README, wiki): https://github.com/fail2ban/fail2ban , https://github.com/fail2ban/fail2ban/wiki
+- Fail2ban filter/jail cấu hình chuẩn: https://github.com/fail2ban/fail2ban/blob/master/config/jail.conf
+- Dovecot — HowTo Fail2ban: https://doc.dovecot.org/2.3/configuration_manual/howto/fail2ban/
+- Gộp filter postfix 0.10+: https://github.com/fail2ban/fail2ban/issues/3103
+
+---
+
+### 3b.6. Nhật ký hệ thống — "hộp đen" để phát hiện sớm
+
+#### 3b.6.1. journalctl — cánh cửa vào nhật ký systemd
+
+Trên Ubuntu hiện đại mọi daemon ghi qua **journald** (binary, tra cứu nhanh) và/hoặc syslog text. Lệnh nền:
+
+```bash
+journalctl -u vsftpd -f            # theo dõi (follow) log của unit vsftpd, kiểu tail -f
+journalctl -u postfix --since "10 min ago"   # chỉ 10 phút gần nhất
+journalctl -u dovecot -u postfix --since today  # ghép nhiều unit
+journalctl -u ssh --grep="Failed password"   # lọc theo chuỗi (bản journald đủ mới)
+journalctl --disk-usage / --vacuum-time=7d   # kiểm soát dung lượng
+```
+
+#### 3b.6.2. Bảng log truyền thống và mẫu dòng thật
+
+Ubuntu vẫn giữ các file văn bản qua **rsyslog** — quen thuộc với công cụ như Fail2ban (dù backend systemd cũng dùng được):
+
+| File | Ai ghi | Dùng cho |
+|---|---|---|
+| `/var/log/auth.log` | sshd, PAM, sudo | brute-force SSH/SFTP, đăng nhập FTP (vsftpd qua PAM) |
+| `/var/log/mail.log` (RHEL: `/var/log/maillog`) | postfix, dovecot, amavis | hành trình thư + auth failure IMAP/POP |
+| `/var/log/vsftpd.log` (nếu `xferlog_enable`+`log_ftp_protocol=YES`) | vsftpd | lệnh USER/PASS, upload/download |
+| `/var/log/syslog` | mọi thứ tổng hợp | khi không chắc nguồn |
+
+Mẫu dòng thật (rất hữu ích khi viết regex cho 3b.5.4):
+
+```text
+# auth.log — sshd/PAM brute-force:
+Aug 29 10:14:02 lab-server sshd[21431]: Failed password for invalid user admin from 192.168.56.20 port 52114 ssh2
+
+# mail.log — postfix với queue-id (mỗi thư một mã 6-12 ký tự, nối các dòng về CÙNG thư):
+Aug 29 10:20:11 lab-server postfix/smtpd[21600]: connect from unknown[192.168.56.20]
+Aug 29 10:20:12 lab-server postfix/smtpd[21600]: warning: hostname ... does not resolve
+Aug 29 10:21:03 lab-server postfix/smtpd[21600]: 4A2F1E0137: client=unknown[192.168.56.20], sasl_method=LOGIN, sasl_username=user1
+Aug 29 10:21:09 lab-server postfix/qmgr[21555]: 4A2F1E0137: from=<user1@lab.local>, size=612, nrcpt=1
+Aug 29 10:21:10 lab-server postfix/smtp[21640]: 4A2F1E0137: to=<user2@lab.local>, relay=dovecot..., status=sent (250 2.0.0 Ok)
+   # ↑ grep -F '4A2F1E0137' mail.log = truy vết TOÀN BỘ vòng đời một bức thư — định dạng syslog chuẩn (RFC 5424 là bản hiện đại của định dạng BSD-syslog mà postfix/dovecot dùng qua rsyslog)
+
+# mail.log — dovecot auth failure:
+Aug 29 10:25:44 lab-server dovecot: imap-login: Disconnected (auth failed, 4 attempts in 22 secs): user=<user1>, method=PLAIN, rip=192.168.56.20, ...
+
+# vsftpd.log:
+Sat Aug 29 10:30:01 2026 [pid 21770] [ftpuser] FAILED LOGIN ON 192.168.56.20 <- 192.168.56.10 [ftpuser]
+```
+
+Kỹ năng đọc nhanh: (1) luôn bắt đầu bằng `auth.log`/`mail.log` của khoảng thời gian nghi ngờ; (2) dùng `queue-id` để lần theo một thư; (3) đếm thất bại theo IP nguồn — `grep 'Failed password' /var/log/auth.log | awk '{print $(NF-3)}' | sort | uniq -c | sort -rn | head` cho ra "top thủ phạm" — chính là dữ liệu đầu vào để kiểm chứng jail Fail2ban hoạt động.
+
+Nguồn:
+- journald/systemd.journal-fields man: https://manpages.ubuntu.com/manpages/noble/man1/journalctl.1.html
+- Postfix LOG_FILES (định dạng queue-id): https://www.postfix.org/LOG_FILES.html
+- Dovecot LogConfig: https://doc.dovecot.org/2.3/configuration_manual/logging/
+
+#### 3b.6.3. rsyslog và logrotate — vì sao lab phải xoay log
+
+- **rsyslog** (`/etc/rsyslog.conf`, drop-in `/etc/rsyslog.d/*.conf`) là daemon nhận bản ghi từ journald/kernel và **ghi thành file text** `/var/log/mail.log`... Nếu tắt rsyslog (bản tối giản), các file text biến mất và Fail2ban chế độ polling không còn gì để đọc — lab cần biết mối liên hệ này.
+- **logrotate** (`/etc/logrotate.d/` — có sẵn cấu hình cho `vsftpd`, `rsyslog`, apt; postfix/dovecot tự xoay hoặc qua gói) cắt file khi tới ngưỡng:
+
+```text
+/var/log/vsftpd.log {
+    weekly          # xoay mỗi tuần
+    rotate 4        # giữ 4 bản nén (.1.gz ... .4.gz) rồi xóa bản cũ nhất
+    compress        # gzip bản cũ — tiết kiệm 90% dung lượng
+    missingok       # không báo lỗi nếu file chưa sinh
+    copytruncate    # vsftpd giữ mở file → copy rồi cắt, không bắt restart
+}
+```
+
+Vì sao bắt buộc: một lab brute-force vài nghìn dòng/phút có thể độn `/var/log` đầy → dịch vụ chết dây chuyền (journald halt, postfix không ghi được log, fail2ban mất nguồn). Test nhanh: `logrotate -d /etc/logrotate.d/vsftpd` (dry-run) rồi `sudo logrotate -f`.
+
+Nguồn: rsyslog docs: https://www.rsyslog.com/doc/ ; logrotate (GitHub): https://github.com/logrotate/logrotate
+
+---
+
+### 3b.7. Tổng kết chương 3b
+
+| Công cụ | Vai trò trong hệ thống phòng thủ của đồ án |
+|---|---|
+| FileZilla / Thunderbird | Chủ thể phát sinh traffic (client); Thunderbird còn là *nguồn tạo key log* để kiểm chứng TLS |
+| Wireshark | Quan sát bằng chứng: plaintext (FTP/POP/IMAP/SMTP không TLS) vs. ciphertext (FTPS/IMAPS/SFTP) |
+| UFW | Giảm bề mặt tấn công (attack-surface reduction) — chặn trước |
+| Fail2ban | Phát hiện sớm + tự phản ứng qua log — chặn sau, theo hành vi |
+| journalctl / rsyslog / logrotate | Chuỗi dữ liệu: sinh log → tập hợp → xoay vòng; là *nguyên liệu* cho mọi kỹ thuật phát hiện sớm ở chương 5 |
+
+Bốn lớp này hợp thành đúng mô hình phòng thủ nhiều lớp (defense in depth): cấu hình an toàn (ch.3a) → kiểm soát truy cập mạng (UFW) → giám sát hành vi (Fail2ban) → truy vết (nhật ký).
+
+---
+
+## 4a. Nguy cơ và lỗ hổng: nhóm xác thực, FTP và quyền file
+
+> **Phạm vi và mục đích sử dụng:** Chương này chỉ phân tích nguy cơ và biện pháp phòng thủ trong **môi trường lab mạng riêng do nhóm sở hữu** (các máy ảo Ubuntu, mạng ảo của hypervisor). Mọi kỹ thuật được mô tả nhằm mục đích giáo dục — hiểu để cấu hình đúng và để đọc log phát hiện sự cố — không phải hướng dẫn tấn công hệ thống thật. Công cụ tấn công (hydra, medusa, ettercap...) chỉ được nhắc ở mức "tồn tại và chỉ dùng trong lab được phê duyệt", không kèm cú pháp chi tiết.
+
+Nhóm nguy cơ phủ định ở chương này xoay quanh ba nhóm vấn đề: (i) **bí mật xác thực bị lộ hoặc bị đoán** (nghe lén plaintext, brute-force, credential stuffing, mật khẩu yếu, tài khoản mặc định/anonymous), (ii) **cấu hình FTP sai** (anonymous, không chroot), và (iii) **quyền file/tài khoản hệ thống sai** (777, symlink, `authorized_keys`, cấu hình SSH/SFTP). Đây là lớp "lỗ hổng người dùng và cấu hình" — thống kê thường xuyên nhất trong các sự cố thực tế, và cũng là lớp dễ phòng ngừa nhất bằng cấu hình đúng ngay từ đầu.
+
+Mỗi nguy cơ được trình bày theo đúng năm mục: **1) Nguyên nhân → 2) Điều kiện xảy ra → 3) Dấu hiệu trong log (kèm log mẫu) → 4) Mức độ ảnh hưởng (C/I/A) → 5) Cách phòng ngừa.**
+
+---
+
+### 4a.1. Nghe lén tài khoản/mật khẩu trên giao thức plaintext
+
+#### (1) Nguyên nhân
+
+Bản chất của vấn đề: FTP, POP3, IMAP và SMTP AUTH khi chạy **không có TLS** truyền toàn bộ phiên — bao gồm cả dòng `USER`/`PASS`, `LOGIN` — dưới dạng **văn bản thuần (cleartext)** trên kênh TCP. Kẻ tấn công chỉ cần "nhìn thấy" được gói tin là đọc được mật khẩu, không cần phá khóa nào cả.
+
+- FTP (RFC 959, TCP port 21) được thiết kế năm 1985, khi giả định mạng nội bộ tin cậy lẫn nhau còn phổ biến; lệnh `PASS` gửi nguyên văn.
+- POP3 (RFC 1939, port 110) dùng cặp lệnh `USER`/`PASS` nguyên văn.
+- IMAP4 (RFC 9051 — phiên bản IMAP4rev2, thay thế RFC 3501; port 143) dùng lệnh `LOGIN user pass`.
+- SMTP AUTH (mở rộng theo RFC 4954, thường ở port 587 submission hoặc 25): cơ chế `AUTH PLAIN` (RFC 4616) chỉ là chuỗi `authzid\0user\0password` (thường để trống `authzid`) rồi **base64**; `AUTH LOGIN` cũng vậy.
+
+**Vì sao base64 không phải mã hóa (encryption):** base64 (RFC 4648) chỉ là phép **biến đổi ký tự (encoding)** để đóng gói byte vào kênh chỉ cho phép ASCII — nó là một hàm song ánh cố định, **không có khóa**, không che giấu thông tin. Ai cũng có thể giải mã bằng một phép tra bảng đảo ngược trong mili-giây. Vì vậy trong Wireshark, filter `ftp` hiển thị thẳng mật khẩu bên cạnh lệnh `USER`/`PASS`; còn với các chuỗi đã base64 hóa (SMTP `AUTH PLAIN`, IMAP `AUTHENTICATE`), chỉ cần một phép đảo bảng mã là mật khẩu hiện nguyên hình — "trông giống mật mã" nhưng không phải mật mã.
+
+#### (2) Điều kiện xảy ra
+
+Không phải ai cũng nghe lén được — kẻ tấn công **phải có vị trí trung gian (Man-in-the-Middle, MitM)** trên đường đi của gói tin. Trong LAN chuyển mạch hiện đại, switch chỉ gửi khung Ethernet đến đúng cổng của đích, nên muốn "nghe" người khác, attacker thường phải:
+
+- **ARP spoofing** (lợi dụng giao thức ARP, RFC 826, không có cơ chế xác thực): gửi giả mạo nói "IP của gateway/trạm đích là địa chỉ MAC của tôi" để nhận lưu lượng của hai bên — công cụ loại này tồn tại và chỉ nên thử trong lab cô lập.
+- Đặt cổng switch ở chế độ **port mirroring/SPAN** (cấu hình sai trên switch quản trị được), hoặc
+- Chạy máy attacker trên **cùng hub / cùng mạng không dây / cùng đoạn ảo hóa** với nạn nhân.
+- Nạn nhân dùng đúng các phiên bản plaintext: FTP port 21 không TLS, POP3 port 110, IMAP port 143 chưa STARTTLS, SMTP `AUTH PLAIN/LOGIN` không bọc TLS.
+
+Ngược lại, nếu hai bên đã dùng TLS thật sự (FTPS, POP3S 995, IMAPS 993, submission 465/587-TLS), dữ liệu trên đường truyền được mã hóa — đó là lý do các tài liệu chuẩn hóa như RFC 8314 ("Cleartext Considered Obsolete") khuyến nghị bắt buộc TLS cho mọi giao thức email.
+
+#### (3) Dấu hiệu trong log — điểm mấu chốt: LOG CỦA NẠN NHÂN KHÔNG CÓ GÌ CẢ
+
+Đây là lý do **phát hiện sớm bằng log phía server là cực kỳ khó** với nguy cơ này:
+
+- Máy chủ FTP/POP3/IMAP/SMTP **không thể phân biệt** một phiên đăng nhập thành công "bình thường" với một phiên mà mật khẩu bị kẻ trung gian đọc trộm — với nó đó chỉ là kết nối TCP hợp lệ và lệnh xác thực đúng. Trong `/var/log/vsftpd.log` hay `auth.log`, mọi thứ vẫn "xanh":
+
+```
+# Log "bình thường" của nạn nhân — KHÔNG có bất kỳ dấu hiệu bất thường nào:
+Mon Aug 24 21:03:11 2026 [pid 22107] [kimdp] OK LOGIN: Client "10.0.2.15"
+```
+
+- Mật khẩu đã qua TLS thì server log cũng không chứa mật khẩu; mật khẩu plaintext thì log càng không "báo" rằng có người thứ ba đang nghe.
+- **Dấu hiệu gián tiếp duy nhất** nằm ở phía **mạng**: bảng ARP của các máy thay đổi bất thường (IP của gateway trỏ tới một MAC lạ xuất hiện lặp lại), hoặc lưu lượng của một host bị định tuyến qua một máy không phải gateway. Đây là thứ phải giám sát bằng công cụ chống ARP spoofing (ví dụ `arpwatch`, động thái ARP bất thường trong log switch) — không phải bằng log dịch vụ.
+
+Vì vậy với lớp tấn công "vị trí MitM", phòng ngừa hoàn toàn đi trước phát hiện: không thiết kế hệ thống dựa vào việc "phát hiện nghe lén", mà loại bỏ plaintext khỏi đường truyền.
+
+#### (4) Mức độ ảnh hưởng
+
+| Tiêu chí | Đánh giá | Lý do |
+|---|---|---|
+| Confidentiality (C) | **Cao** | Tài khoản + mật khẩu bị lộ trực tiếp; với POP3/IMAP lộ cả nội dung mail đang truyền. |
+| Integrity (I) | Trung bình–Cao | Attacker dùng credential hợp lệ để đăng nhập rồi sửa/xóa/đổi mật khẩu — hệ thống coi đó là người dùng thật. |
+| Availability (A) | Thấp | Hiếm khi gây gián đoạn dịch vụ ngay, trừ khi attacker phá dữ liệu sau khi đăng nhập. |
+
+#### (5) Cách phòng ngừa
+
+1. **Tắt hẳn giao thức plaintext, bật phiên bản mã hóa:** FTPS (TLS) hoặc tốt hơn là **SFTP/SCP** thay FTP port 21; POP3S 995 thay 110, IMAPS 993 thay 143, SMTP submission 587 **bắt buộc STARTTLS** (hoặc 465 implicit TLS).
+   ```
+   # vsftpd: ép phiên nào cũng phải TLS (tham số trong /etc/vsftpd.conf)
+   ssl_enable=YES             # bật FTPS
+   allow_anon_ssl=NO          # anonymous không được dùng SSL (chặn hẳn về sau)
+   force_local_data_ssl=YES   # dữ liệu bắt buộc qua TLS
+   force_local_logins_ssl=YES # đăng nhập bắt buộc qua TLS
+   ```
+   ```
+   # Dovecot (10-ssl.conf + 10-auth.conf): từ chối login khi chưa có TLS
+   ssl = required                      # không cho phép AUTH khi chưa bật TLS
+   auth_verbose = yes                  # ghi chi tiết cơ chế xác thực vào log
+   ```
+2. Trong lab khi cần test FTP để hiểu giao thức, **chỉ dùng tài khoản "mồi"**, đặt ở VLAN/mạng ảo tách khỏi máy chủ dữ liệu; sau bài học thì chuyển sang SFTP.
+3. Triển khai chứng chỉ TLS (kể cả self-signed trong lab) và cấu hình client từ chối kết nối không TLS.
+4. Giám sát ARP/mạng bằng `arpwatch` hoặc tính năng Dynamic ARP Inspection trên switch quản trị được; theo dõi động thái kết nối bất thường giữa hai máy nội bộ không có lý do truyền file.
+
+**Nguồn:**
+- FTP — RFC 959: https://www.rfc-editor.org/rfc/rfc959
+- POP3 — RFC 1939: https://www.rfc-editor.org/rfc/rfc1939
+- IMAP4rev2 — RFC 9051: https://www.rfc-editor.org/rfc/rfc9051
+- SMTP AUTH — RFC 4954; AUTH PLAIN — RFC 4616; Base64 — RFC 4648: https://www.rfc-editor.org/rfc/rfc4954, https://www.rfc-editor.org/rfc/rfc4616, https://www.rfc-editor.org/rfc/rfc4648
+- Khuyến nghị bỏ cleartext (RFC 8314): https://www.rfc-editor.org/rfc/rfc8314
+- Wireshark hiển thị phiên FTP plaintext: https://wiki.wireshark.org/FTP
+
+---
+
+### 4a.2. Brute-force dò mật khẩu và credential stuffing
+
+#### (1) Nguyên nhân
+
+Hai kiểu tấn công "đoán mật khẩu" khác nhau về bản chất:
+
+- **Brute-force / password spraying:** một tài khoản × nhiều mật khẩu ứng viên (theo dictionary từ yếu tới mạnh) hoặc nhiều tài khoản × một mật khẩu phổ biến. attacker được tiếp cận trực tiếp cổng đăng nhập lặp vô hạn vì **giao thức không giới hạn số lần thử**.
+- **Credential stuffing:** **dùng sẵn danh hiệu credential rò rỉ** (từ các vụ lộ dữ liệu ở dịch vụ khác, bán/truyền trên mạng) để thử nguyên cặp user:pass vào nhiều dịch vụ. Vì sao hiệu quả: **người dùng tái sử dụng mật khẩu (password reuse)** — xác suất một email đăng ký ở dịch vụ A cũng dùng đúng mật khẩu đó ở dịch vụ B là đáng kể. Credential stuffing **không "đoán" gì cả**, nên mỗi lần thử đều là mật khẩu "hợp lý" theo quan điểm con người.
+
+Trong lab đồ án: các dịch vụ mail/FTP mở port 21/110/143/587 là bề mặt lý tưởng cho cả hai, đặc biệt vì nhiều cấu hình mặc định không giới hạn số lần thất bại.
+
+#### (2) Điều kiện xảy ra
+
+- Dịch vụ đăng nhập bằng mật khẩu, mở từ mạng (hoặc từ cả LAN trong lab) và **không có rate-limit/lockout có kiểm soát**.
+- attacker có mạng lưới botnet/IP phân tán (thực tế) hoặc nhiều máy trong lab (mô phỏng).
+- Với credential stuffing: tồn tại "combo list" từ các vụ lộ dữ liệu — người dùng reuse password.
+- Mật khẩu nằm trong dictionary (làm brute-force nhanh ăn) — xem 4a.3.
+
+**Dịch vụ nào dễ bị nhất?** Theo thứ tự: **SSH (2222/22) và IMAP/FTP plaintext login** — vì xác thực nhiều lần trên cùng một kết nối TCP (IMAP LOGIN gửi lại nhiều lần rất rẻ; brute-force FTP mỗi lần thử thường phải mở kết nối điều khiển mới, chậm hơn một chút nhưng vẫn dễ tự động hóa). POP3 tương tự FTP. SMTP AUTH (587) cũng bị nhắm vì attacker muốn chiếm hộp thư để gửi spam.
+
+#### (3) Dấu hiệu trong log — so sánh mẫu log hai loại
+
+**Brute-force** — signature: **cùng một IP, cùng một user (hoặc ít user), rất nhiều lần `Failed`, chuỗi mật khẩu khác nhau liên tiếp**, cường độ cao trong thời gian ngắn:
+
+```
+# /var/log/auth.log — brute-force SSH (nhiều mật khẩu khác nhau, cùng tài khoản)
+Aug 24 22:01:03 lab-srv sshd[3011]: Failed password for invalid user oracle from 10.0.2.99 port 51122 ssh2
+Aug 24 22:01:04 lab-srv sshd[3012]: Failed password for invalid user oracle from 10.0.2.99 port 51123 ssh2
+Aug 24 22:01:05 lab-srv sshd[3013]: Failed password for kimdp from 10.0.2.99 port 51124 ssh2
+...  (hàng trăm dòng liên tiếp trong vài phút, cùng IP nguồn)
+```
+
+```
+# vsftpd (/var/log/vsftpd.log) — brute-force nhiều mật khẩu trên cùng tài khoản
+Mon Aug 24 22:04:11 2026 [pid 22340] FAIL LOGIN: Client "10.0.2.99"
+Mon Aug 24 22:04:12 2026 [pid 22341] FAIL LOGIN: Client "10.0.2.99"
+Mon Aug 24 22:04:13 2026 [pid 22342] FAIL LOGIN: Client "10.0.2.99"
+```
+
+```
+# Dovecot — auth failed (mẫu giống nhau cho POP3/IMAP)
+Aug 24 22:05:02 lab-srv dovecot: imap-login: Disconnected (auth failed, 1 attempts in 2 secs): user=<admin>, method=PLAIN, rip=10.0.2.99, lip=10.0.2.5
+```
+
+**Credential stuffing** — signature: **rất NHIỀU TÀI KHẢN khác nhau, mỗi tài khoản chỉ 1–2 lần thử, mật khẩu "trông có vẻ hợp lệ"** (không phải `password123` mà là chuỗi đủ dài theo chính sách cũ), IP phân tán hoặc một vài proxy đánh chậm (low-and-slow) để lẫn vào nền. Tỷ lệ `Failed` : `Accepted` cân bằng hơn nhiều, và quan trọng là **có một vài `Accepted` thật** vì có user reuse mật khẩu:
+
+```
+# Dovecot — một IP, nhiều user khác nhau, mỗi user 1 lần (mẫu stuffing)
+Aug 24 23:10:01 dovecot: imap-login: Disconnected (auth failed, 1 attempts): user=<lankt@lab.local>, rip=10.0.3.77
+Aug 24 23:10:03 dovecot: imap-login: Disconnected (auth failed, 1 attempts): user=<hongnv@lab.local>, rip=10.0.3.77
+Aug 24 23:10:05 dovecot: pop3-login: Login: user=<minhtq@lab.local>, method=PLAIN, rip=10.0.3.77   <-- 1 lần THÀNH CÔNG hiếm hoi giữa hàng loạt thất bại
+```
+
+Mẹo phân biệt trong lab: brute-force thì **group by user → count lớn**; stuffing thì **group by IP → count lớn nhưng distinct users ≈ count attempts**.
+
+#### (4) Mức độ ảnh hưởng
+
+| Tiêu chí | Đánh giá | Lý do |
+|---|---|---|
+| Confidentiality (C) | **Cao** | Đăng nhập thành công → đọc toàn bộ mail (POP3/IMAP) hoặc file (FTP). |
+| Integrity (I) | Cao | Đổi mật khẩu, xóa mail, gửi mail giả danh, upload file độc hại. |
+| Availability (A) | Trung bình | Chính các đợt dò lớn có thể làm nghẽn dịch vụ/auth backend; lockout sai còn tự gây DoS (xem mục 5). |
+
+#### (5) Cách phòng ngừa
+
+1. **Chọn rate-limit thay vì lockout "cứng" theo tài khoản.** Khóa tài khoản sau 5 lần sai là dao hai lưỡi: attacker chỉ cần biết tên đăng nhập là có thể **cố tình gõ sai để khóa tài khoản nạn nhân** — tấn công từ chối dịch vụ (DoS) nhắm vào người dùng hợp lệ. Chính sách hiện đại (NIST SP 800-63B về định danh số) khuyến nghị **giới hạn tốc độ theo địa chỉ IP nguồn + throttle lũy tiến** (chậm dần theo số lần sai), không khóa vĩnh viễn người dùng chỉ vì ai đó đoán sai.
+2. **Dùng Fail2ban** (https://github.com/fail2ban/fail2ban): đọc log `vsftpd`, `dovecot`, `sshd`, `postfix` và áp `iptables/nftables BAN` theo cửa sổ thời gian — tức rate-limit ngay tầng mạng, mặc định có sẵn filter `sshd`, `vsftpd`, `dovecot`.
+3. Bỏ mật khẩu nếu có thể: **khóa SSH bằng public key**, tắt `PasswordAuthentication`.
+4. Bắt buộc mật khẩu mạnh + chặn reuse giữa các dịch vụ (xem 4a.3); khuyến nghị bật **xác thực hai lớp (2FA)** cho các tài khoản quản trị mail/SSH.
+5. Với credential stuffing phòng gần như duy nhất bằng phía người dùng: **mật khẩu duy nhất cho mỗi dịch vụ** (dùng trình quản lý mật khẩu), và phía server: thông báo cho user khi đăng nhập từ thiết bị/IP mới.
+6. Trong lab: mô phỏng bằng công cụ dò tồn tại (hydra, medusa...) **giữa hai máy lab tự sở hữu**, bật Fail2ban và so sánh log trước/sau khi bật để thấy hiệu quả của throttle.
+
+**Nguồn:**
+- NIST SP 800-63B (Digital Identity Guidelines — rate-limit, blocklist mật khẩu rò rỉ): https://pages.nist.gov/800-63-3/sp800-63b.html
+- Fail2ban (bộ lọc sshd/vsftpd/dovecot/postfix): https://github.com/fail2ban/fail2ban
+- Dovecot (log định dạng `imap-login: Disconnected (auth failed...`): https://doc.dovecot.org/
+- Postfix SASL: https://www.postfix.org/SASL_README.html
+
+---
+
+### 4a.3. Mật khẩu yếu và tài khoản mặc định
+
+#### (1) Nguyên nhân
+
+**Mật khẩu yếu:** người dùng chọn mật khẩu theo pattern quen — tên + số, `123456`, `password`, `qwerty`, chuỗi dictionary — vì dễ nhớ và không bị chính sách chặn. Về mặt thông tin (entropy), mật khẩu dictionary có không gian tìm kiếm quá nhỏ so với tốc độ dò của công cụ hiện đại; nếu kết hợp với 4a.1/4a.2 thì gần như chắc chắn bị phá.
+
+**Tài khoản mặc định:** các image đóng gói sẵn thường kèm cặp user:pass công khai. Phổ biến nhất trong thế giới ảo hóa/lab: `ubuntu:ubuntu` (user `ubuntu` sẵn có trong image cloud/VM — ảnh dựng lab thường giữ nguyên mật khẩu gốc, khác với cloud image chính thức buộc cấu hình qua cloud-init), `admin:admin`, `root:root`, `test:test`, và chính **`anonymous:ftp@`** của FTP (mô tả kỹ ở 4a.4). Người dùng cuối không đổi vì "nó chạy được rồi".
+
+#### (2) Điều kiện xảy ra
+
+- Máy dựng từ image/template VM hoặc từ cài đặt nhanh không đi qua bước đổi mật khẩu root/admin.
+- PAM không cấu hình kiểm độ mạnh mật khẩu; `/etc/login.defs` để chính sách cũ; hệ thống không đổi mật khẩu lần đầu bắt buộc.
+- Dịch vụ mở port ra LAN công cộng của lab mà vẫn giữ credential mặc định — attacker chỉ cần tra bảng "default credentials" của hãng.
+
+Trong lab của đồ án, đây là nguy cơ **hay xảy ra nhất một cách vô tình**: sinh viên clone máy ảo và quên đổi mật khẩu `ubuntu`, hoặc tạo user `test` cho tiện rồi bỏ quên.
+
+#### (3) Dấu hiệu trong log
+
+- Bản thân "mật khẩu yếu" không có log riêng — nó lộ ra khi kết hợp với brute-force (4a.2): tài khoản bị `Failed` rất nhiều lần rồi một `Accepted` từ cùng IP.
+- Tài khoản mặc định bị quét: các dòng login **thành công** với user `ubuntu`/`admin`/`ftp` từ IP lạ:
+```
+Aug 25 00:12:44 lab-srv sshd[3390]: Accepted password for ubuntu from 10.0.3.51 port 4021 ssh2   # user ảnh gốc, mật khẩu gốc
+Mon Aug 25 00:15:02 2026 [pid 22551] [ftp] OK LOGIN: Client "10.0.3.51", anon password "hack@"     # đăng nhập anonymous bằng pass là email (chuẩn RFC 959 cho phép)
+```
+- Kiểm tra chủ động bằng audit (không phải log): so tài khoản đang tồn tại với danh sách mặc định của image, chạy `passwd -S <user>` (xem ngày đổi mật khẩu lần cuối).
+
+#### (4) Mức độ ảnh hưởng
+
+| Tiêu chí | Đánh giá | Lý do |
+|---|---|---|
+| Confidentiality (C) | **Cao** | Mật khẩu dictionary/ mặc định = cánh cửa mở sẵn đọc dữ liệu. |
+| Integrity (I) | **Cao** | Nếu tài khoản mặc định là `ubuntu`/`admin` có quyền sudo → toàn quyền trên máy. |
+| Availability (A) | Cao | Attacker đã có shell có thể xóa dữ liệu/mã hóa tống tiền. |
+
+#### (5) Cách phòng ngừa
+
+1. **Chính sách độ dài > chính sách "phức tạp":** mật khẩu dài (≥ 12–16 ký tự, hoặc passphrase nhiều từ) cho entropy cao hơn kiểu bắt buộc `@#$` xen kẽ. Đồng thời **chặn pattern/dictionary**:
+   - Trên Ubuntu/RHEL/Fedora, kiểm tra độ mạnh mặc định do **`pam_pwquality`** đảm nhiệm (gói `libpam-pwquality`, dòng `password requisite pam_pwquality.so retry=3` trong `/etc/pam.d/common-password`); phần kiểm tra từ điển dựa trên dữ liệu **CrackLib** (https://github.com/cracklib/cracklib).
+   - Rule đặt ở `/etc/security/pwquality.conf`: độ dài tối thiểu `minlen`, số lớp ký tự `dcredit`/`ucredit`/`lcredit`/`ncredit`, `dictcheck`, `maxsequence` (chuỗi tăng/giảm đều như `12345`), `maxrepeat` (ký tự lặp).
+   - Cấu hình vòng đời trong `/etc/login.defs`: `PASS_MIN_LEN 8`, `PASS_MAX_DAYS 180`... (giá trị chỉ là ví dụ — chọn theo chính sách đồ án).
+2. **Loại bỏ mật khẩu rò rỉ:** đối chiếu với các danh sách mật khẩu bị lộ công khai (NIST SP 800-63B yêu cầu kiểm tra "breached password list" khi đổi mật khẩu).
+3. **Xóa/khóa mọi tài khoản mặc định sau khi dựng hệ thống:** `userdel` các user `test`, đặt lại mật khẩu `ubuntu` ngay lần đăng nhập đầu, khóa `root` đăng nhập trực tiếp qua mật khẩu.
+4. Trong lab: thêm bước "đổi mật khẩu mặc định" vào quy trình dựng ảnh chuẩn (golden image), và kiểm tra bằng audit trước khi mở port.
+
+**Nguồn:**
+- cracklib: https://github.com/cracklib/cracklib
+- NIST SP 800-63B (breached list, yêu cầu độ dài): https://pages.nist.gov/800-63-3/sp800-63b.html
+- login.defs(5) — Ubuntu manpages: https://manpages.ubuntu.com/manpages/noble/man5/login.defs.5.html
+- vsftpd — log mẫu anonymous login: https://www.ossec.net/docs/docs/log_samples/ftp/vsftpd.html
+
+---
+
+### 4a.4. FTP anonymous cấu hình sai
+
+#### (1) Nguyên nhân
+
+FTP có chế độ **anonymous** hợp lệ theo chuẩn: tài khoản `ftp`/`anonymous`, mật khẩu quy ước là địa chỉ email (RFC 959 không kiểm tra giá trị này). Mục đích lịch sử: phân phối file công khai mà không cần cấp tài khoản. Nguy cơ nằm ở **cấu hình**, không ở chuẩn: vsftpd mặc định `anonymous_enable=YES`; nếu quản trị viên thêm các bật quyền ghi mà không hiểu hệ quả thì server biến thành "ổ đĩa công cộng":
+
+```
+# /etc/vsftpd.conf — bộ ba cấu hình SAI (chỉ dùng để minh họa trong lab):
+anonymous_enable=YES          # cho phép tài khoản ftp/anonymous đăng nhập
+anon_world_readable_only=NO   # SAI: anon được tải XUỐNG mọi file, kể cả file chỉ chủ sở hữu đọc được
+anon_upload_enable=YES        # SAI: ai cũng UPLOAD file lên server được
+```
+
+- `anon_world_readable_only=NO` bỏ lớp bảo vệ cuối cùng của phía đọc.
+- `anon_upload_enable=YES` (thường đi kèm `anon_mkdir_write_enable=YES`, `write_enable=YES` và một thư mục `ftp` sở hữu, world-writable) cho phép phía ghi.
+
+#### (2) Điều kiện xảy ra
+
+- vsftpd cài theo mặc định (Ubuntu/Debian bật anonymous download sẵn) + quản trị viên "copy-paste" hướng dẫn kích hoạt upload công khai mà không đặt giới hạn.
+- Thư mục con trong `ftp_root` (thường `/srv/ftp` hoặc `/home/ftp`) **world-writable** để anonymous ghi được.
+- Server có IP truy cập được từ LAN trong lab (hoặc tệ hơn là từ Internet).
+
+#### (3) Dấu hiệu trong log
+
+vsftpd log rõ ràng từng phiên anonymous — cần phân biệt "download công khai theo thiết kế" với "upload bất thường":
+
+```
+# /var/log/vsftpd.log — dòng đăng nhập anonymous (log thật của vsftpd, dạng OK LOGIN + anon password):
+Mon Aug 21 14:32:06 2006 [pid 20127] [ftp] OK LOGIN: Client "10.0.2.15", anon password "lala@"
+
+# /var/log/vsftpd.log (log_ftp_protocol=YES) — các hành vi đáng báo động phía sau đăng nhập:
+... [pid 20128] ftp [10.0.2.x]: "[STOR malware.zip] 0 12345678 bytes"     # AI ĐÓ vừa UPLOAD file lên — điều không nên xảy ra
+... [pid 20129] ftp [10.0.2.x]: "[DELE secret.sql]"                        # anon xóa file (anon_other_write_enable=YES — rất tệ)
+```
+*(Các daemon FTP khác dùng câu chữ tương đương, ví dụ pure-ftpd ghi "Anonymous user 10.0.2.15 logged in"; các log kiểu wu-ftpd/proftpd có dạng "anonymously logged in"; về bản chất cùng một sự kiện.)*
+
+Dấu hiệu định lượng trong lab: nhiều `[STOR ...]` từ client lạ, file lạ xuất hiện trong `ftp_root`, băng thông upload tăng bất thường.
+
+#### (4) Mức độ ảnh hưởng
+
+| Tiêu chí | Đánh giá | Lý do |
+|---|---|---|
+| Confidentiality (C) | **Cao** (khi tắt `anon_world_readable_only`) | Ai cũng tải được mọi file trong thư mục FTP — bao gồm file không định công bố. |
+| Integrity (I) | **Cao** | Người lạ ghi file vào server: phát tán malware, nội dung vi phạm pháp luật **mang danh máy của trường/nhóm**; nếu `chroot` sai còn có thể ghi đè file hệ thống (liên kết 4a.5). |
+| Availability (A) | Trung bình | Đĩa đầy vì đối tượng lạ upload hàng loạt → dịch vụ chết. |
+
+**Hệ quả điển hình:** máy FTP cấu hình sai trở thành **file hosting miễn phí phát tán malware** — chủ sở hữu server bị nhà mạng/đại học gắn trách nhiệm và bị black-list IP, dữ liệu trong thư mục FTP (backup, dump DB) bị mất bí mật hoàn toàn.
+
+#### (5) Cách phòng ngừa
+
+1. Nếu lab/dịch vụ **không cần** phân phối file công khai: `anonymous_enable=NO` (khuyến nghị mặc định cho đồ án).
+2. Nếu **có** nhu cầu phân phối công khai:
+   ```
+   anonymous_enable=YES
+   anon_world_readable_only=YES   # GIỮ NGUYÊN mặc định: chỉ file world-readable được tải
+   anon_upload_enable=NO          # KHÔNG bật upload cho anonymous
+   anon_mkdir_write_enable=NO
+   anon_other_write_enable=NO     # không cho xóa/ghi đè
+   ```
+   và trỏ `ftp_username` tới user riêng không có shell (`/usr/sbin/nologin`), thư mục FTP tách khỏi dữ liệu khác, disk quota riêng.
+3. Giám sát và cảnh báo: regex đếm dòng `OK LOGIN ... anon password` + `[STOR` trong `vsftpd.log`; Fail2ban có sẵn filter `vsftpd` cho login thất bại.
+4. cân nhắc thay anonymous FTP bằng **HTTP/HTTPS công khai** — cùng mục đích phân phối file mà không cần tài khoản vô danh và có thể đặt CDN/cache.
+
+**Nguồn:**
+- vsftpd.conf(5) (định nghĩa các tham số anonymous): https://manpages.debian.org/testing/vsftpd/vsftpd.conf.5.en.html và https://linux.die.net/man/5/vsftpd.conf
+- Red Hat Deployment Guide — vsftpd server: https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/6/html/deployment_guide/s2-ftp-servers-vsftpd
+- Mẫu log vsftpd/xferlog (OSSEC docs): https://www.ossec.net/docs/docs/log_samples/ftp/vsftpd.html
+
+---
+
+### 4a.5. Thoát khỏi thư mục được phép và sai phân quyền file
+
+#### (1) Nguyên nhân
+
+Hai họ lỗi "hàng rào thư mục":
+
+**a) Không cách ly (thiếu chroot) hoặc cách ly sai.** vsftpd **mặc định không chroot** user vào home — với filesystem khả kiến toàn bộ, user đăng nhập hợp lệ có thể `cd /etc`, `cd ~khac` và thử đọc theo quyền Unix. Các hướng dẫn chroot thường gặp lỗi cấu hình:
+- vsftpd từ bản **2.3.5** **từ chối** chạy phiên khi thư mục chroot-root **do chính user đó sở hữu hoặc global-writable**, và từ bản **3.0.3** có thêm "lối thoát" `allow_writeable_chroot=YES` — nhiều người "gỡ lỗi bằng cách" bật dòng này → đúng ra hàng rào vừa bị bỏ: attacker upload file mới/symlink vào chính "buồng giam" của mình.
+- **Symlink ra ngoài:** nếu FTP (hoặc SFTP) cho phép tạo symlink `dự án -> /`, rồi `cd dự án`, thì về mặt kernel đường dẫn vẫn được giải tham chiếu tới `/` — chroot nếu đặt **sai chỗ** (chroot sau khi đã ở trong vùng ghi được của user) là vô nghĩa.
+- Lệnh `CWD ../..` kiểu **directory traversal** chỉ thành công khi server tự ghép đường dẫn mà không chuẩn hóa (canonicalize) — các daemon trưởng thành chặn được, nhưng cấu hình alias/virtual user sai vẫn để lọt; với daemon tự viết hoặc script PHP/Python phục vụ file thì đây là bug kinh điển.
+
+**b) Phân quyền file sai.** `chmod 777` "cho nó chạy", file cấu hình world-readable:
+- `/etc/passwd` về thiết kế phải `644` — đọc được là bình thường (chỉ có hash đã chuyển sang `/etc/shadow`, phải `640`/`600` root:shadow). Nhưng trong lab hoặc cấu hình sai, **`/etc/shadow` bị readable bởi mọi người** hoặc **`~/.ssh/` `authorized_keys` `666`** thì cực nguy hiểm.
+- File cấu hình dịch vụ (`/etc/vsftpd.conf`, `inc.php` chứa DB password...) `777`/`644` cho mọi user đọc → lộ credential nội bộ → leo thang từ một tài khoản FTP "vô hại".
+
+#### (2) Điều kiện xảy ra
+
+- vsftpd không đặt `chroot_local_user=YES`, hoặc đặt nhưng home **sở hữu bởi user đó** + `allow_writeable_chroot=YES`.
+- Người dùng có thể tạo symlink (quyền `allow_writeable_chroot`, hoặc SFTP có shell) vào thư mục world-writable.
+- File `~/.ssh` hoặc `authorized_keys` thuộc sở hữu của user khác / permission mở (`777`, `666`).
+- File `/etc/shadow`, file cấu hình nhạy cảm bị đổi mode do thao tác `chmod` sai trong quá trình làm lab.
+
+#### (3) Dấu hiệu trong log
+
+```
+# vsftpd log_ftp_protocol=YES — hành vi dò đường đi lên filesystem:
+... [pid 24001] kimdp [10.0.2.20]: "[CWD ../..]" 1
+... [pid 24001] kimdp [10.0.2.20]: "[CWD /]" 1        # nếu trả về 1 (OK) => chưa chroot thành công
+... [pid 24001] kimdp [10.0.2.20]: "[RETR /etc/passwd]" 1   # đọc thử file hệ thống — 1 = thành công!
+```
+```
+# auth.log — dấu hiệu "thành công" của leo thang qua authorized_keys:
+Aug 25 02:44:19 lab-srv sshd[4102]: Accepted publickey for kimdp from 10.0.2.99 port 47810 ssh2: RSA SHA256:9x...   # key mà KIMDP không hề tạo
+```
+Dấu hiệu fs: `auditd` hoặc kiểm tra định kỳ `find / -perm -o+w -type f`, `stat /etc/shadow`, `stat -c '%U %a' ~user/.ssh/authorized_keys` so với chuẩn (chủ sở hữu=user, `700` thư mục, `600` file).
+
+#### (4) Mức độ ảnh hưởng
+
+| Tiêu chí | Đánh giá | Lý do |
+|---|---|---|
+| Confidentiality (C) | **Cao** | Đọc `/etc/passwd` (liệt kê user để tấn công 4a.2), file cấu hình, mail spool của người khác. |
+| Integrity (I) | **Rất cao** | Ghi `authorized_keys` của user khác (xem liên kết 4a.6) hoặc `crontab` hệ thống → chiếm quyền truy cập dài hạn. |
+| Availability (A) | Trung bình | Xóa/ghi đè file của dịch vụ. |
+
+#### (5) Cách phòng ngừa
+
+1. **chroot đúng chuẩn vsftpd:**
+   ```
+   chroot_local_user=YES       # mọi user local bị giam vào home
+   # KHÔNG BAO GIỜ dùng: allow_writeable_chroot=YES khi home do chính user sở hữu
+   ```
+   Mô hình an toàn: `home` do **root sở hữu, mode 755** (không cho user ghi → vừa thỏa vsftpd vừa chặn symlink), bên trong có thư mục `upload/` do user sở hữu để nhận file.
+2. **SFTP thì dùng `ChrootDirectory` của sshd** (xem 4a.6) — chuẩn hơn vì enforced ở tầng SSH.
+3. **Nguyên tắc quyền tối thiểu (least privilege):** không `777` bao giờ; dùng nhóm + `750`; file cấu hình nhạy cảm `600` root:root hoặc root:group-dịch-vụ.
+4. Audit tự động trong lab: cron hàng ngày chạy `find` các file world-writable + `logwatch`/so sánh checksum cấu hình; cân nhắc `auditd` watch `/etc/shadow`, `~/.ssh`.
+5. Khi cần traversal test trong lab: **chỉ test trên chính máy mình sở hữu** để thấy log mẫu — đây là cách học "dấu hiệu" chứ không phải để tấn công.
+
+**Nguồn:**
+- vsftpd.conf(5) (mô tả `chroot_local_user`, `allow_writeable_chroot`): https://manpages.debian.org/testing/vsftpd/vsftpd.conf.5.en.html
+- Red Hat Deployment Guide — vsftpd: https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/6/html/deployment_guide/s2-ftp-servers-vsftpd
+- Linux File Permissions (Ubuntu Community Help): https://help.ubuntu.com/community/FilePermissions
+
+---
+
+### 4a.6. Lạm dụng tài khoản SFTP/SSH
+
+#### (1) Nguyên nhân
+
+SSH/SFTP được mã hóa nên miễn nhiễm 4a.1, nhưng **nó vẫn là cửa vào shell** nếu cấu hình rộng:
+
+- sshd cho phép user có **shell tương tác** (`/bin/bash`) hoặc chỉ muốn "gửi file" nhưng mở cả kênh SFTP → cùng tài khoản đó có thể chạy lệnh, forward cổng.
+- **`authorized_keys` bị ghi bởi người khác:** nếu `~/.ssh` hoặc `authorized_keys` permission sai (xem 4a.5) — ví dụ thư mục `777` hoặc sở hữu bởi user khác — thì (a) sshd **từ chối dùng key đó** (StrictModes, log báo `Authentication refused: bad ownership or modes`), nhưng quan trọng hơn (b): một attacker đã có quyền ghi vào đó **thêm public key của họ** → vào như chủ nhà, không cần mật khẩu.
+- **Tunnel/port-forward đi ngang trong lab:** tài khoản SSH bị dùng làm "bàn đạp" — `ssh -L`/`-R`/`ProxyJump` mở đường tới các máy khác vốn không mở port ra ngoài; máy có SSH trở thành router cho attacker.
+- **`PermitRootLogin yes` + xác thực mật khẩu:** cho phép brute-force thẳng vào tài khoản quyền lực nhất.
+
+Ngoài ra lưu ý chuỗi cung ứng lịch sử: vsftpd 2.3.4 từng bị cài **backdoor** công khai (CVE-2011-2523) — bài học "dịch vụ FTP/SSH chạy trên host cũng là bề mặt tấn công".
+
+#### (2) Điều kiện xảy ra
+
+- `PasswordAuthentication yes` + `PermitRootLogin yes` (mặc định cũ) trong khi máy mở port 22.
+- User được thêm vào sshd mà không kèm `Match` block giới hạn.
+- Thư mục `~/.ssh` không thuộc quyền user hoặc permission >700/600.
+- `AllowTcpForwarding`/`GatewayPorts` bật mặc định cho mọi user.
+- Quản trị viên dùng SFTP với tư duy "an toàn hơn FTP nên không cần giới hạn gì thêm" — **SFTP an toàn trên đường truyền nhưng không an toàn về cách ly nếu phân quyền trong máy sai**: cùng một user SFTP có thể đọc thư mục của user khác nếu Unix permission cho phép.
+
+#### (3) Dấu hiệu trong log
+
+```
+# /var/log/auth.log — ĐĂNG NHẬP ROOT BẰNG MẬT KHẨU từ LAN (đọc kỹ dòng này):
+Aug 25 03:11:40 lab-srv sshd[4310]: Accepted password for root from 10.0.2.99 port 41220 ssh2
+```
+```
+# Key bị người khác ghi thêm / quyền sai:
+Aug 25 03:12:02 lab-srv sshd[4321]: Authentication refused: bad ownership or modes for directory /home/kimdp/.ssh
+Aug 25 03:12:05 lab-srv sshd[4325]: Accepted publickey for kimdp from 10.0.2.99 port 41240 ssh2: ED25519 SHA256:Kz...   # fingerprint KHÔNG có trong danh sách quản lý
+```
+```
+# Forwarding đi ngang (log -vv / UsePAM + systemd, hoặc nftables theo dõi kết nối tới máy thứ ba):
+... sshd[4400]: pam_unix(sshd:session): session opened for user sftpuser ...
+# và trong nft/conntrack: máy 10.0.2.5 (chỉ mở 22) BẤT NGỜ kết nối tới 10.0.2.6:3306 — chính là tunnel của sftpuser.
+```
+So sánh fingerprint key trong log với `ssh-keygen -lf authorized_keys` — mọi key lạ là dấu hiệu chiếm quyền.
+
+#### (4) Mức độ ảnh hưởng
+
+| Tiêu chí | Đánh giá | Lý do |
+|---|---|---|
+| Confidentiality (C) | **Rất cao** | Một tài khoản SSH = đọc toàn bộ filesystem theo quyền user; root = mọi thứ. |
+| Integrity (I) | **Rất cao** | Chạy lệnh bất kỳ, cài persistence (key, cron, service). |
+| Availability (A) | Cao | Tunnel giúp attacker lan tới các máy khác trong lab, đánh sập nhiều dịch vụ cùng lúc. |
+
+#### (5) Cách phòng ngừa
+
+1. **Nhật hóa cấu hình SSH cho SFTP-only** (áp dụng nguyên mẫu chuẩn của OpenSSH, các tham số đã có sẵn từ lâu — `ChrootDirectory`/`ForceCommand`/`internal-sftp` từ OpenSSH 4.9 (2008), `PermitTTY` từ 6.7 (2014), `DisableForwarding` từ 7.4):
+   ```
+   # /etc/ssh/sshd_config
+   PermitRootLogin prohibit-password   # Ubuntu/Debian mặc định là giá trị này; tốt nhất là "no"
+   PasswordAuthentication no           # chỉ khóa public key
+   Subsystem sftp internal-sftp        # sftp chạy trong tiến trình sshd — không cần file trong chroot
+
+   Match Group sftpusers               # nhóm chỉ gửi file, không shell
+       ChrootDirectory %h              # giam vào home (home phải root:root, 755 — vsftpd/sshd đều kiểm tra)
+       ForceCommand internal-sftp      # chặn scp/shell, chỉ còn SFTP
+       PermitTTY no                    # không cấp terminal
+       DisableForwarding yes           # chặn MỌI loại forward (X11, agent, TCP, unix socket)
+   ```
+   Lưu ý phiên bản: `DisableForwarding` dùng được trong `Match` từ OpenSSH **8.5**; và có lỗi **CVE-2025-32728** ở các bản trước 10.0 (đúng ra `DisableForwarding` không tắt hẳn X11/agent forwarding) — luôn cập nhật openssh-server.
+2. **Quản lý vòng đời key:** mỗi user tự giữ private key; khi nghỉ/khóa tài khoản phải xóa public key khỏi `authorized_keys`; ghi `~/.ssh` (700) và `authorized_keys` (600) thuộc chính user; bật `StrictModes` (mặc định).
+3. Chặn tunnel ở tầng mạng lab: **egress firewall** — máy FTP/SFTP chỉ được phép nhận kết nối, không được khởi tạo tới các phân đoạn khác; khi đó dù attacker có forward cũng không đi đâu được.
+4. Theo dõi `auth.log` tập trung (rsyslog → máy log riêng) + Fail2ban filter `sshd`; so sánh định kỳ fingerprint key trong `authorized_keys` với kho quản lý.
+5. Tài khoản dịch vụ (dùng để đẩy file vào server) phải là user riêng, không có shell (`/usr/sbin/nologin`), và **bắt buộc chroot**.
+
+**Nguồn:**
+- sshd_config(5) (man page chính thức): https://man7.org/linux/man-pages/man5/sshd_config.5.html và https://man.openbsd.org/sshd_config
+- OpenSSH 4.9 release notes (ChrootDirectory/ForceCommand/internal-sftp): https://www.openssh.org/txt/release-4.9
+- OpenSSH 6.7 release notes (PermitTTY): https://www.openssh.org/txt/release-6.7
+- OpenSSH 7.4 release notes (DisableForwarding): https://www.openssh.org/txt/release-7.4
+- OpenSSH Security + CVE-2025-32728: https://www.openssh.com/security.html , https://nvd.nist.gov/vuln/detail/CVE-2025-32728
+- CVE-2011-2523 (backdoor vsftpd 2.3.4): https://nvd.nist.gov/vuln/detail/CVE-2011-2523
+- Fail2ban: https://github.com/fail2ban/fail2ban
+
+---
+
+### 4a.7. Tổng hợp nhanh — bảng đối chiếu phòng ngừa
+
+| # | Nguy cơ | Phát hiện sớm khả thi? | Biện pháp chủ lực |
+|---|---|---|---|
+| 4a.1 | Nghe lén plaintext | **Rất khó** (log nạn nhân không có gì) → phòng ngừa tuyệt đối | Bỏ plaintext: FTPS/SFTP, 993/995/465-587 TLS; giám sát ARP |
+| 4a.2 | Brute-force / stuffing | Có (log `Failed`/`auth failed` + mẫu phân bố) | Rate-limit theo IP (Fail2ban), khóa bằng key, chặn reuse password |
+| 4a.3 | Mật khẩu yếu / mặc định | Một phần (audit + login lạ) | cracklib/pwquality, đổi credential mặc định, NIST 800-63B |
+| 4a.4 | FTP anonymous sai | Có (`OK LOGIN ... anon password`, `[STOR`) | `anonymous_enable=NO` hoặc giữ nguyên các giới hạn world-readable, không upload |
+| 4a.5 | Thoát thư mục / 777 | Có (`CWD /`, `RETR /etc/passwd`, audit file) | chroot đúng ownership, quyền tối thiểu, auditd |
+| 4a.6 | Lạm dụng SSH/SFTP | Có (`Accepted password for root`, key lạ) | ChrootDirectory + ForceCommand internal-sftp + PermitTTY no + DisableForwarding, egress firewall |
+
+Toàn bộ nội dung chương này được đối chiếu trên các bản tài liệu mới nhất tại thời điểm viết (tháng 8/2026); môi trường tham chiếu là **Ubuntu 26.04 LTS "Resolute Raccoon"** (phát hành tháng 4/2026, bản hiện hành trong lab của nhóm) — các đường dẫn cấu hình (`/etc/vsftpd.conf`, `/etc/ssh/sshd_config`, `/etc/login.defs`) không đổi so với LTS cũ 24.04.
+
+**Nguồn tổng:**
+- Ubuntu release cycle / LTS hiện hành: https://ubuntu.com/about/release-cycle , https://documentation.ubuntu.com/release-notes/26.04/
+
+---
+
+## 4b. Nguy cơ và lỗ hổng: nhóm email, TLS và vòng đời phần mềm
+
+Chương này tiếp quản chương 4a (nhóm FTP/SFTP) và đi qua nhóm dịch vụ còn lại của đồ án: **SMTP (Postfix), POP3/IMAP (Dovecot)**, cộng thêm hai mảng xuyên suốt mà mọi dịch vụ đều dính — **cấu hình TLS** và **vòng đời phần mềm** (update/EOL, cấu hình mặc định). Bảy nguy cơ dưới đây được trình bày theo đúng khung 5 mục của chương 4a: **Nguyên nhân → Điều kiện xảy ra → Dấu hiệu trong log → Ảnh hưởng → Phòng ngừa**, kèm dòng log mẫu của Postfix/Dovecot/vsftpd đúng định dạng syslog.
+
+> **Phạm vi thử nghiệm:** mọi phép kiểm thử, đo tải, thử relay, quét cấu hình trong chương này chỉ thực hiện trên lab mạng riêng do nhóm sở hữu (các máy ảo nội bộ, không định tuyến ra Internet công cộng). Không dùng các trang "open relay test" công cộng, không gửi spam thật, không tấn công hệ thống của người khác. Tài liệu phục vụ mục đích giáo dục và phòng thủ.
+
+Toàn cảnh chương:
+
+| # | Nguy cơ | Dịch vụ liên quan | Bản chất một câu |
+|---|---------|-------------------|------------------|
+| 1 | SMTP open relay | Postfix | Server chuyển tiếp thư cho người lạ → thành máy phát spam |
+| 2 | Spoofing / phishing / giả mạo tên miền | SMTP | Giao thức không bắt buộc kiểm tra địa chỉ `From:` |
+| 3 | Mã độc trong upload/đính kèm | vsftpd + Postfix/Dovecot | Server trở thành ổ chứa và trạm trung chuyển malware |
+| 4 | Lạm dụng SMTP AUTH | Postfix + Dovecot auth | Tài khoản bị đánh cắp → "relay hợp pháp" |
+| 5 | DoS | SMTP/IMAP/POP3 | Làm kiệt tiến trình, hàng đợi hoặc đĩa |
+| 6 | Lỗi cấu hình TLS | Mọi dịch vụ có STARTTLS/SSL | Mã hóa "cho có": cert self-signed, cipher yếu, bị strip |
+| 7 | Phần mềm lỗi thời & cấu hình mặc định | vsftpd, OpenSSH, Postfix, Dovecot | CVE tích tụ + default vì compatibility, không vì security |
+
+---
+
+### 1. SMTP open relay — khi mail server của bạn phát thư hộ kẻ lạ
+
+**Nguyên nhân.** *Open relay* là tình trạng máy chủ SMTP nhận thư từ người không thuộc hệ thống của mình và chuyển tiếp (relay) đi đến một tên miền thứ ba không thuộc hệ thống — tức trở thành "kẻ trung chuyển" cho kẻ tấn công. Ba nguồn gốc kinh điển của open relay, cả ba đều rất dễ gặp trong đồ án sinh viên:
+
+- **Thói quen "mạng học thuật cũ".** Thời kỳ đầu của Internet (RFC 788 rồi RFC 821 — hai RFC SMTP sớm nhất), hầu hết mail server để mở relay vì (a) tài nguyên máy chủ còn hạn chế, khó bật xác thực, và (b) các trường đại học, viện nghiên cứu **cố ý** mở relay để giảng viên/gửi viên trong mạng học thuật gửi thư đi mọi nơi. Mô hình tin tưởng đó sụp đổ khi spam bùng nổ; SMTP hiện đại (RFC 5321, 2008) không còn hàm ý "ai cũng được relay".
+- **`mynetworks` khai báo quá rộng.** Trong Postfix, tham số `mynetworks` (khai báo ở `/etc/postfix/main.cf`, xem tài liệu cấu hình cơ bản của Postfix) liệt kê những mạng được "tự động cho relay". Một dòng `mynetworks = 0.0.0.0/0` (đại loại "ai cũng là mạng nội bộ") biến server thành open relay hoàn toàn — đây là lỗi kinh điển khi migrate: copy `main.cf` máy cũ rồi nới `mynetworks` "cho đỡ lỗi relay denied" rồi quên siết lại.
+- **Sửa cấu hình khi đang "chữa cháy" sau migrate.** Nhiều hướng dẫn trên mạng khuyên đặt `smtpd_recipient_restrictions = permit_mynetworks` mà thiếu điều kiện chặn cuối; hoặc tắt nhầm tính năng chặn. Lưu ý quan trọng đã được **kiểm chứng từ tài liệu chính thức của Postfix**: tham số `smtpd_relay_restrictions` có từ Postfix 2.10 (được đưa ra đúng như "lưới an toàn" chống open relay do chuỗi lọc spam trong `smtpd_recipient_restrictions`), và ở các bản Postfix hiện hành — mọi bản Ubuntu còn được hỗ trợ đều dùng nhánh 3.x — giá trị **mặc định an toàn** là
+  `smtpd_relay_restrictions = permit_mynetworks, permit_sasl_authenticated, defer_unauth_destination`
+  — tức mọi thư gửi đến địa chỉ không thuộc domain của ta, từ client chưa xác thực, sẽ bị từ chối/trì hoãn. (Ngoại lệ: khi nâng cấp từ cấu hình rất cũ, cơ chế `compatibility_level` có thể giữ hành vi default rỗng — vì vậy luôn kiểm tra bằng `postconf` thay vì tin vào trí nhớ.) Open relay thường **không** đến từ mặc định, mà đến từ việc người quản trị **ghi đè** mặc định đó bằng một chuỗi thiếu điều kiện chặn cuối.
+
+**Điều kiện xảy ra.** Đủ ba yếu tố là có open relay: (1) server nghe cổng 25 ở interface tiếp xúc được từ ngoài; (2) chuỗi quan hệ `*_restrictions` cho phép RCPT (địa chỉ nhận) không thuộc `mydestination`/`virtual_mailbox_domains` mà không chặn; (3) không có `reject_unauth_destination`/`defer_unauth_destination` (hoặc tương đương) ở cuối chuỗi.
+
+**Dấu hiệu trong log.** Open relay **để lại dấu vết rất đặc trưng** trong `/var/log/mail.log`. Khi kẻ lạ dùng server của bạn gửi thư cho hàng loạt địa chỉ xa, bạn sẽ thấy chuỗi ba loại dòng sau lặp lại với tần suất bất thường:
+
+```log
+# 1) Kết nối đến từ IP vô danh, tự khai helo giả, nhận nhiều RCPT "xa"
+Aug 29 03:14:02 mail01 postfix/smtpd[28744]: connect from unknown[185.220.101.42]
+Aug 29 03:14:05 mail01 postfix/smtpd[28744]: 5F3A2C19D4: client=unknown[185.220.101.42]
+
+# 2) cleanup ghi nhận message-id, còn qmgr đưa VÀO HÀNG ĐỢI GỬI ĐI
+#    (chứng tỏ thư đã ĐƯỢC ACCEPT, không bị reject)
+Aug 29 03:14:05 mail01 postfix/cleanup[28750]: 5F3A2C19D4: message-id=<20260829031405.5F3A2C19D4@mail01.lab.local>
+Aug 29 03:14:06 mail01 postfix/qmgr[1234]: 5F3A2C19D4: from=<promo@get-rich-quick.example>, size=4213, nrcpt=57 (queue active)
+```
+
+Ba tín hiệu để nhận diện: `from=<địa chỉ xa>`, `to=<nhiều địa chỉ xa>` — đặc biệt `nrcpt` (số người nhận trong một message) lớn bất thường (57 người nhận trong 1 message là chữ ký điển hình của spam list), và `client=unknown[IP]` (IP không phân giải được ngược, không TLS, không SASL) rồi hàng đợi `mailqueue` (`postqueue -p`) phình lên nhanh. Server cấu hình đúng **phải** log dòng reject thay vì chấp nhận:
+
+```log
+# Cấu hình ĐÚNG sẽ chặn và log thế này (Postfix ghi rõ "Relay access denied";
+# với defer_unauth_destination mã là 454 4.7.1, với reject_unauth_destination là 554 5.7.1):
+Aug 29 03:14:05 mail01 postfix/smtpd[28744]: NOQUEUE: reject: RCPT from unknown[185.220.101.42]:
+  554 5.7.1 <victim@aol.example>: Relay access denied; from=<promo@get-rich-quick.example> to=<victim@aol.example> proto=ESMTP helo=<mail.get-rich-quick.example>
+```
+
+Gõ trong lab: `tail -f /var/log/mail.log | grep -E "Relay access denied|connect from"` để theo dõi realtime (chuỗi Postfix ghi là `Relay access denied`, không phải `relaydenied` — grep sai chuỗi sẽ trả 0 kết quả và tạo cảm giác yên tâm giả); `postqueue -p` để xem số lượng thư chờ gửi (chờ gửi nhiều tới domain lạ = nguy cơ).
+
+**Ảnh hưởng.** Hậu quả của open relay không nằm trong LAN của bạn mà ở **danh sách chặn (DNSBL)**: chỉ sau vài phút, IP của bạn bị Spamhaus (SBL/XBL, gộp trong danh sách "Zen") và các blocklist khác ghi nhận; mọi thư **hợp lệ** của domain `lab.local`/domain trường gửi đi các nơi sẽ bị từ chối hoặc rơi vào spam. IP/domain "bị ô nhiễm" có khi mất nhiều tuần mới gỡ khỏi danh sách (yêu cầu xác minh cấu hình lại). Đây là lý do nhóm phải coi open relay là sự cố nghiêm trọng, không phải "lỗi nhỏ".
+
+**Phòng ngừa.**
+1. Kiểm tra chuỗi relay đang hoạt động thực tế: `postconf smtpd_relay_restrictions smtpd_recipient_restrictions mynetworks` và đảm bảo còn hạn chế cuối chặn relay không xác thực.
+2. Siết `mynetworks` đúng nghĩa: chỉ `127.0.0.0/8`, dải `10.x` nội bộ.
+3. **Không** gửi thử relay qua website công cộng. Thay vào đó dùng chính server trong lab làm "máy khách": trên VM B (IP lạ, không nằm trong mynetworks), kết nối SMTP tới port 25 VM A rồi thử gửi tới một địa chỉ ngoài — server an toàn phải trả **`554 5.7.1 Relay access denied`** và log dòng NOQUEUE ở trên. (Về mặt tự động, có các thư viện/script kiểm tra relay — chỉ chạy giữa các máy của nhóm, không chạm hệ thống ngoài.)
+4. Bật TLS opportunistically (`smtpd_tls_security_level = may`) và SASL cho submission (port 587) để relay "hợp pháp" qua xác thực, không qua IP nguồn.
+5. Đưa giám sát `connect from unknown` + `nrcpt>` lớn vào cron alert; bật Fail2ban (mục 5) với filter `postfix-sasl`/`postfix-rbl` như lớp phòng thủ phụ.
+
+**Nguồn:**
+- Postfix — Configuration parameters (mặc định `smtpd_relay_restrictions`): https://www.postfix.org/postconf.5.html
+- Postfix — SMTP relay and access control: https://www.postfix.org/SMTPD_ACCESS_README.html
+- Postfix — SASL Howto: https://www.postfix.org/SASL_README.html
+- RFC 5321 — Simple Mail Transfer Protocol: https://www.rfc-editor.org/info/rfc5321
+- Spamhaus Blocklist: https://www.spamhaus.org/
+
+---
+
+### 2. Email spoofing, phishing và giả mạo tên miền
+
+**Nguyên nhân.** Đây là điểm cần hiểu bản chất nhất chương: **SMTP (RFC 5321) không bắt buộc máy chủ kiểm tra tính xác thực của địa chỉ gửi.** Trong một phiên SMTP có tới *hai* "địa chỉ gửi":
+
+```text
+MAIL FROM:<envelope@sender.example>   ← envelope (SMTP command), dùng cho đường trả về
+From: "Ngân hàng ACB" <cskh@acb-vip.example>   ← HEADER (RFC 5322), người dùng nhìn thấy
+```
+
+Hai cái này **hoàn toàn độc lập**: RFC cho phép MAIL FROM là bất kỳ chuỗi nào; header `From:` lại càng do người gửi tự viết, server không có nghĩa vụ xác minh. Do đó chỉ cần một server nhận thư bất kỳ (kể cả open relay như mục 1), kẻ tấn công ghi `From: Ngân hàng nọ <no-reply@nganhang.vn>` và mọi client mail hiển thị đúng như vậy. **Không có lỗ hổng phần mềm nào ở đây cả** — đó là thiết kế lịch sử của giao thức, và giải pháp (SPF/DKIM/DMARC — giải thích kỹ ở chương 6) là bổ sung ngữ nghĩa **bên trên** SMTP, không phải SMTP tự kiểm tra.
+
+Ba biến thể người dùng hay mắc:
+- **Display-name attack:** phần hiển thị `"Công ty ABC - Bộ phận IT"` gợi tin cậy, còn address thật là `abc-it-phishing@xyz.ru` — client thu gọn address, chỉ hiện display name.
+- **Typosquatting domain:** đăng ký `g00gle-mail.com`, `trương-đại-học.edu.vn` (dấu tiếng Việt bị punycode hóa khó đọc)...
+- **SMTP smuggling** (kỹ thuật nâng cao, có CVE thật): các biến thể xử lý dấu xuống dòng trong giao thức khiến server "nhìn thấy" một thư khác với thư server nhận kiểm tra DMARC. CVE xác minh được trong hệ sinh thái Exim: **CVE-2023-51766** — "SMTP smuggling", cho phép vượt DKIM để giả mạo người gửi, được vá ở Exim 4.97.1 (các sản phẩm khác cũng bị ảnh hưởng ở các mức khác nhau; bản vá của chúng được phát hành rộng rãi từ đầu 2024). Đừng nhầm với **CVE-2019-10149** — "The Return of the WIZard", một lỗi RCE Exim khác (xem mục 7).
+
+**Điều kiện xảy ra.** (1) Server không áp dụng kiểm tra SPF/DKIM/DMARC ở chiều nhận **và** (2) người nhận không được cảnh báo. Server của nhóm nếu chỉ làm MTA chuyển tiếp thì không có lỗi nào — nhưng nếu nhóm dựng server nhận thư (MX cho domain nội bộ) thì thiếu kiểm tra xác thực phía nhận = tiếp tay phishing.
+
+**Dấu hiệu trong log.** Spoofing **gần như vô hình trong log của server bạn**, trừ khi bạn là nạn nhân (thư bị bounce về `from=<địa chỉ bị giả mạo>` gây "backscatter"). Trong lab, cách duy nhất "nhìn thấy" nó là bật kiểm tra và đọc header:
+
+```log
+# Khi Postfix có policy server (postscreen/AMaVIS) hoặc header_checks, bạn có thể log:
+Aug 29 09:02:11 mail01 postfix/smtpd[30102]: 9A21F0C4: client=dialer-42.isp.example[203.0.113.42]
+# Và trong header Received của thư đến, so sánh MAIL FROM vs From — sẽ khác nhau.
+```
+
+Nghiên cứu header một thư mẫu bằng `less` / công cụ phân tích header trong lab: dòng nào đến từ máy chủ "không cùng nhà cung cấp với domain From:" là nghi ngờ.
+
+**Ảnh hưởng.** Người dùng trong lab/trường bị dụ đăng nhập vào trang giả → mất credential (dẫn tới nguy cơ mục 4); tài khoản bị chiếm gửi phishing nội bộ rất khó bị chặn vì "đã được xác thực".
+
+**Phòng ngừa.** Bật SPF/DKIM/DMARC trên domain của lab (chương 6 hướng dẫn cấu hình chi tiết); bật kiểm tra xác thực phía nhận bằng policy daemon; chặn backscatter bằng `smtpd_reject_unlisted_recipient = yes` (mặc định Postfix đã bật — để nguyên); và trên hết **đào tạo người dùng**: kiểm tra address thật (không chỉ tên hiển thị), không bấm link khi chưa xác minh qua kênh thứ hai.
+
+**Nguồn:**
+- RFC 5321 (SMTP envelope) và RFC 5322 (header `From:`): https://www.rfc-editor.org/rfc/rfc5321 / https://www.rfc-editor.org/rfc/rfc5322
+- Postfix — SMTP smuggling advisory: https://www.postfix.org/smtp-smuggling.html
+- NVD — CVE-2023-51766 (Exim SMTP smuggling): https://nvd.nist.gov/vuln/detail/CVE-2023-51766
+- CERT/CC — VU#517845: authenticated SMTP users may spoof other identities (ambiguous "From" header): https://www.kb.cert.org/vuls/id/517845
+
+---
+
+### 3. Mã độc trong file upload và đính kèm
+
+**Nguyên nhân.** Ba "cửa" đưa file độc vào hạ tầng lab và hợp nhất thành một chuỗi lây nhiễm: **anonymous upload của FTP** (vsftpd `anonymous_enable=YES` + `write_enable=YES` — chương 4a đã nói), **đính kèm email** (server nhận thư ai cũng gửi vào được), và **hành vi người dùng** mở `.exe`/`.scr`, `.docm`/`.xlsm` có macro. Bản chất: dịch vụ **không có nghĩa vụ** kiểm tra nội dung file — đó là tầng ứng dụng mà quản trị phải tự bổ sung thêm (antivirus daemon, content filter).
+
+**Điều kiện xảy ra.** (1) Thư mục upload/anonymous có quyền ghi; (2) không có quét virus hoặc quét chỉ theo lịch (file đã nằm đó hàng giờ trước khi ai đó đọc `virus_scanner.log`); (3) người nhận bật macro Office; (4) thư mục upload nằm trên filesystem **cho phép thực thi** (đó là lý do mount option `noexec` — chương 4a — tồn tại).
+
+**Dấu hiệu trong log.** vsftpd log upload với timestamp + user + kích thước (`/var/log/vsftpd.log`, định dạng "full time log"):
+
+```log
+Sat Aug 29 02:41:07 2026 [pid 22318] [ftp] UPLOAD: /incoming/invoice_final.exe  482304 bytes <- [185.220.101.42]
+Sat Aug 29 02:41:09 2026 [pid 22318] [ftp] 1 files uploaded
+```
+
+Phía mail, thư có attachment nghi vấn thể hiện qua `postfix/cleanup` (kích thước lớn, message-id lạ) và log của content filter (nếu có amavisd/clamav):
+
+```log
+Aug 29 02:52:33 mail01 amavis[2311]: (2311-05) Passed CLEAN {RelayedInbound}, [203.0.113.42]:51772 [spam@x.example] -> <labmate@lab.local>, Queue-ID: 5F3A2C19D4, Message-ID: <20260829025201.9F1C@x.example>, Size: 482304, Elapsed time 1.2
+Aug 29 02:52:33 mail01 clamd[2455]: /var/lib/amavis/tmp/amavis-20260829-0251/amavis@2311.12345: Eicar-Test-Signature FOUND   ← nếu bật scan
+```
+
+Trong lab, dùng chuỗi chuẩn **EICAR** (tệp test vô hại 68 ký tự) làm mẫu để kiểm pipeline quét có hoạt động hay không — đây là kỹ thuật kiểm tra phòng thủ được chấp nhận rộng rãi.
+
+**Ảnh hưởng.** Server trở thành **ổ chứa** (cảnh sát/hệ thống ngoài phát hiện hosting malware trên IP của trường → bị blacklisted như mục 1); người cùng lab mở file từ shared FTP hoặc attachment → lây nội bộ; và khi đó máy của nạn nhân lại thành bàn đạp tấn công máy khác.
+
+**Phòng ngừa.**
+1. Tắt anonymous upload nếu không cần (`anonymous_enable=NO` hoặc `write_enable=NO`); nếu cần, mount `/srv/ftp` với `noexec` (kể cả `nosuid,nodev`) — file nằm đó không chạy được trực tiếp.
+2. Quét virus bằng **ClamAV** (`clamav-daemon` + `amavisd-new` hoặc `clamsmtp`) — kèm **ghi chú chi phí thật**: ClamAV ăn CPU/RAM khi scan và **phải cập nhật signature hằng ngày** qua `freshclam` (cần cho phép truy cập `database.clamav.net` trong firewall của lab); quét sai cấu hình còn tệ hơn không quét (người dùng quen "đã scan = an toàn").
+3. Policy định dạng: từ chối `*.exe, *.scr, *.vbs, *.docm` ở content filter phía nhận; với FTP, đặt `chown_uploads` về user không có shell và giới hạn dung lượng (`local_max_upload_rate`); yêu cầu người nhận kiểm tra bằng mắt tên kép (`invoice.pdf.exe`) — client nên bật hiển thị phần mở rộng.
+4. Kiểm tra định kỳ `find /srv/ftp -perm -u+x` (file khả thi nằm trong vùng upload = bất thường).
+
+**Nguồn:**
+- vsftpd.conf manpage (Ubuntu): https://manpages.ubuntu.com/manpages/noble/man5/vsftpd.conf.5.html
+- ClamAV (daemon + FreshClam signature updates): https://docs.clamav.net/
+- EICAR test file (hiệp định kiểm thử AV chuẩn): https://www.eicar.org/download-anti-malware-testfile/
+
+---
+
+### 4. Lạm dụng SMTP AUTH — "relay hợp pháp" phát spam
+
+**Nguyên nhân.** Mục 1–2 giả định kẻ tấn công **không** có gì trong tay. Nhưng nếu có credential hợp lệ — do phishing (mục 2), do mật khẩu yếu bị brute-force bằng các công cụ như hydra/medusa (tồn tại, chỉ dùng được trong lab được phê duyệt, không nêu cú pháp ở đây), do credential reuse từ vụ lộ dữ liệu khác — thì kẻ đó được Postfix/Dovecot đối xử như **người dùng thật**: `permit_sasl_authenticated` trong chuỗi relay **đành phải** cho qua, vì về mặt giao thức không có gì để từ chối. Đây là "lỗ hổng chính sách": xác thực chứng minh *đúng tài khoản*, không chứng minh *đúng ý định*.
+
+**Điều kiện xảy ra.** Tài khoản mail có mật khẩu yếu / bị lộ + submission port 587 mở từ Internet + không giới hạn tốc độ theo user.
+
+**Dấu hiệu trong log.** Sau xác thực thành công, Postfix ghi `client=` kèm thông tin SASL trong từng dòng cleanup/qmgr, cho phép truy vết theo `sasl_username`:
+
+```log
+Aug 29 10:05:12 mail01 postfix/submission/smtpd[31440]: 7E2B441C9A: client=victim-laptop.isp.example[203.0.113.7], sasl_method=PLAIN, sasl_username=sv_atp
+Aug 29 10:05:13 mail01 postfix/qmgr[1234]: 7E2B441C9A: from=<sv_atp@lab.local>, size=3021, nrcpt=1 (queue active)
+# Lặp lại hàng trăm lần/phút với CÙNG sasl_username nhưng recipient là domain lạ:
+Aug 29 10:05:14 mail01 postfix/smtpd[31441]: 8A10F72D5B: client=... sasl_username=sv_atp
+```
+
+Cách phát hiện bằng mắt trong lab: `grep "sasl_username=sv_atp" /var/log/mail.log | grep "client=" | wc -l` so với baseline; hoặc đếm message/ngày theo username (`awk '{print $NF}' | sort | uniq -c`). Dovecot cũng log `imap-login`/`auth` với cùng username — đối chiếu thời điểm login bất thường (IP lạ, 3h sáng) với spike volume.
+
+**Ảnh hưởng.** Spam đi từ domain "sạch", dễ vượt bộ lọc phía nhận hơn; cả domain bị vào Spamhaus (mục 1) dù cấu hình relay đúng; người dùng thật bị khóa do vượt quota.
+
+**Phòng ngừa.**
+1. **Giới hạn tốc độ** — Postfix có sẵn cơ chế qua daemon `anvil`: `smtpd_client_connection_rate_limit`, `smtpd_client_message_rate_limit`, `anvil_rate_time_unit` (mặc định 60s). Ví dụ cho submission: mỗi client/IP ≤ 30 message/phút.
+2. **Cảnh báo volume theo tài khoản** (script cron đếm `sasl_username` theo giờ, alert khi > baseline × 3) — không tham số mặc định nào làm thay bạn việc này.
+3. Chính sách mật khẩu + **MFA/app-password** cho webmail; nếu client buộc dùng SMTP plain-auth thì cấp app-password riêng dễ thu hồi.
+4. Vô hiệu hóa ngay khi có nghi vấn: `postconf -e` không chặn theo-user — dùng `access(5)` map (`REJECT account suspended`) hoặc disable account phía backend auth (Dovecot dùng userdb `shadow`/SQL → đổi trạng thái user).
+5. Fail2ban filter `postfix-sasl` chặn IP brute-force sau N lần auth fail (cấu hình ở `/etc/fail2ban/jail.local`).
+
+**Nguồn:**
+- Postfix — ANVIL (rate control): https://www.postfix.org/ANVIL_README.html và http://www.postfix.org/postconf.5.html#smtpd_client_message_rate_limit
+- Postfix — access(5) map: https://www.postfix.org/access.5.html
+- Fail2ban (filters postfix-sasl): https://github.com/fail2ban/fail2ban
+
+---
+
+### 5. Từ chối dịch vụ (DoS) — làm kiệt tiến trình, hàng đợi và đĩa
+
+**Nguyên nhân / các biến thể.**
+- **Flood kết nối:** kẻ tấn công mở hàng trăm kết nối tới port 25 rồi **giữ im lặng** (slowloris SMTP) hoặc đóng/mở liên tục; mỗi kết nối chiếm một process `smtpd` con do `master` sinh ra; chạm `default_process_limit` → server từ chối kết nối thật.
+- **Làm đầy hàng đợi:** kết hợp open relay (mục 1) hoặc tài khoản bị chiếm (mục 4) — gửi khối lượng lớn thư tới các domain **không phân giải được MX** để thư kẹt trong queue chờ gửi lại (retry); `maximal_queue_lifetime` / `bounce_queue_lifetime` (mặc định Postfix giữ thư tới 5 ngày — `5d`) làm hàng đợi phình đến khi **đầy đĩa** — hết đĩa thì mọi dịch vụ khác trên máy (kể cả FTP/Dovecot maildir) sập theo.
+- **Verb abuse:** khai thác lệnh `VRFY`/`EXPN` (lưu ý: compiled default của Postfix là `disable_vrfy_command = no` — phải chủ động bật `yes` và kiểm tra bằng `postconf disable_vrfy_command`, đừng mặc định nghĩ là đã tắt sẵn), hoặc abuse cổng 110/143 (POP3/IMAP) với login loop để đầy `dovecot` process slots (`default_process_limit`, `mail_max_userip_connections`).
+
+**Điều kiện xảy ra.** Dịch vụ tiếp xúc Internet + không rate-limit + disk/queue không cảnh báo sớm.
+
+**Dấu hiệu trong log.**
+```log
+# (a) Flood kết nối: smtpd báo chạm giới hạn process — dòng của postfix/master:
+Aug 29 11:22:04 mail01 postfix/master[900]: warning: /usr/lib/postfix/sbin/smtpd: bad command startup -- throttling
+# Khi kiệt file descriptor, các process Postfix báo nguyên văn "Too many open files"
+# (điểm gọi cụ thể thay đổi tuỳ lúc, nhưng chuỗi này luôn xuất hiện — ví dụ:):
+Aug 29 11:22:04 mail01 postfix/smtpd[31999]: fatal: cannot open queue file: Too many open files
+# (b) Queue phình: thư bị defer vì MX đích chết — grep "status=deferred":
+Aug 29 11:30:00 mail01 postfix/qmgr[1234]: D4117FE2C: from=<user@lab.local>, status=deferred (connect to mx.dead-domain.example[93.184.x.x]:25: Connection timed out)
+# (c) Dovecot quá tải vì login loop (dòng thật, hay gặp khi flood POP3/IMAP):
+Aug 29 11:31:10 mail01 dovecot: imap-login: Disconnected: Maximum number of connections from user+IP exceeded (mail_max_userip_connections=10): user=<>, method=PLAIN, rip=203.0.113.7
+```
+Giám sát trong lab: `mailq | tail -n1` (dòng cuối báo số kB / số message trong queue), `df -h /var/spool/postfix`, đếm `connect from` mỗi phút.
+
+**Ảnh hưởng.** Mất dịch vụ theo nghĩa đen (không gửi/nhận được); đầy đĩa lan ra toàn hệ thống file; sửa sự cố tốn gấp nhiều lần phòng.
+
+**Phòng ngừa.**
+1. `smtpd_client_connection_rate_limit = 20` và `smtpd_client_connection_count_limit = 10` (anvil tính theo `anvil_rate_time_unit`); tương tự cho submission: đặt tên service riêng trong `master.cf` với `-o` overrides.
+2. `disable_vrfy_command = yes` — compiled default của Postfix là **no**, nên dòng này phải chủ động thêm chứ không phải "mặc định đã bật"; `smtpd_helo_required = yes` (buộc handshake tử tế trước khi cho MAIL FROM).
+3. Giới hạn vòng đời queue: `maximal_queue_lifetime = 1d`, `bounce_queue_lifetime = 1d` — thư kẹt chỉ tồn tại 24h thay vì 5 ngày (mặc định), giảm rõ rệt áp lực đĩa khi bị bơm thư.
+4. Cảnh báo disk (`df` cron > 80%), alert số message trong queue vượt baseline.
+5. Lớp network: UFW rate-limit cho port 25/587/143/993/995 (ví dụ `ufw limit proto tcp from any to any port 25` — theo manpage ufw, chặn IP khởi tạo **≥ 6 kết nối trong 30 giây**), Fail2ban tự động block IP sau N lỗi.
+
+**Nguồn:**
+- Postfix ANVIL README: https://www.postfix.org/ANVIL_README.html
+- Postfix postconf — maximal_queue_lifetime: https://www.postfix.org/postconf.5.html#maximal_queue_lifetime
+- Dovecot — Limits (process/connection limits) (giới hạn process/kết nối): https://doc.dovecot.org/latest/core/admin/limits.html
+- ufw manpage (limit rule): https://manpages.ubuntu.com/manpages/noble/man8/ufw.8.html
+
+---
+
+### 6. Lỗi cấu hình TLS — mã hóa "cho có" còn tệ hơn không mã hóa
+
+**Nguyên nhân.** Nhóm này đặc biệt vì **bản thân TLS không phải lỗ hổng — cách ta dùng nó mới là vấn đề**:
+
+- **Cert self-signed + văn hóa "accept anyway".** Cert tự ký không có chuỗi tin cậy (CA) → trình mail báo lỗi to đùng → người dùng bấm "Proceed Anyway" cho nhanh. Hệ quả tâm lý: họ **quen** với cảnh báo, nên khi kẻ tấn công làm MitM thật (cert thật nhưng sai, hoặc cert self-signed khác), không ai nhận ra. Cert hết hạn còn tệ hơn: nhiều client bỏ hẳn phiên.
+- **Thư viện/cipher lỗi thời.** Đã **kiểm chứng trong chuẩn**: SSLv3 bị **RFC 7568** (6/2015) deprecated sau tấn công **POODLE**; TLS 1.0/1.1 bị **RFC 8996** (3/2021) chính thức deprecated; RC4 bị **RFC 7465** (4/2015) nghiêm cấm trong TLS (tấn công bias RC4 keystream); cipher hạng xuất khẩu 40-bit và các suite "EXPORT" từng bị phá bởi tấn công Logjam-style. BEAST (CVE-2011-3389) đánh vào TLS 1.0 CBC — cùng họ lý do phải bỏ 1.0. Nếu server còn bật các giao thức này cho tương thích client cũ, mọi phiên "có ổ khóa" đó đều yếu.
+- **Downgrade / STARTTLS stripping.** SMTP/POP3/IMAP dùng cơ chế **opportunistic STARTTLS** (RFC 3207): client kết nối plaintext, hỏi `EHLO`, thấy dòng `STARTTLS` mới nâng cấp. Nếu attacker ở giữa **lọc mất dòng `STARTTLS`** trong response (và response của server lại không được ký bởi một TLS binding — vì TLS chưa bật!), client "lặng lẽ" gửi tiếp plaintext, trong đó có **SASL PLAIN = mật khẩu dạng text**. Cơ chế chống: **Mandatory/Enforced TLS** (`smtpd_tls_security_level = encrypt` phía nhận nếu muốn; phía gửi `smtp_tls_security_level = mandatory` + DANE/checkname) và trên submission port **chỉ cho AUTH sau khi đã TLS** (`smtpd_tls_auth_only = yes`).
+- **Không có tín hiệu trong log ứng dụng.** Đây là điểm phân biệt với các mục 1–5: cert sai, cipher yếu **không tự sinh log**. Phát hiện phải bằng **audit chủ động**: `openssl s_client -connect mail01.lab:25 -starttls smtp` (ràng buộc vào server của chính nhóm trong lab, hoàn toàn hợp lệ), hoặc script tự kiểm trong lab liệt kê protocol mà server chấp nhận.
+
+**Điều kiện xảy ra.** Cert self-signed hết hạn; `ssl_protocols` chứa TLSv1; `smtpd_tls_auth_only` để `no`; port 993/995 cũ không cấu hình chain file đầy đủ.
+
+**Dấu hiệu.** Trong Postfix log, phiên **không** TLS thể hiện ở `proto=` có mặt `STARTTLS` nhưng thiếu cờ an toàn — cách sạch nhất là cấu hình để log hiện tình trạng TLS: bật `smtpd_tls_loglevel = 1` sẽ thấy các dòng:
+
+```log
+Aug 29 12:02:41 mail01 postfix/smtpd[32210]: Anonymous TLS connection established from mail.isp.example[198.51.100.9]: TLSv1.3 with cipher TLS_AES_256_GCM_SHA384 (256/256 bits)   ← OK
+# Kết nối KHÔNG TLS (bị strip hoặc client cũ) — không có dòng "TLS connection established" nào cho session này:
+Aug 29 12:03:02 mail01 postfix/smtpd[32215]: 41B2C0F7: client=mail.isp.example[198.51.100.9]
+# Dovecot: log login kèm hoặc không kèm trường "TLS":
+Aug 29 12:10:00 mail01 dovecot: imap-login: Login: user=<sv_atp>, method=PLAIN, rip=10.0.2.15, TLS   ← có
+Aug 29 12:10:05 mail01 dovecot: imap-login: Login: user=<sv_atp>, method=PLAIN, rip=203.0.113.7      ← KHÔNG có "TLS" = plaintext!
+```
+
+**Ảnh hưởng.** Nghe lén mật khẩu và nội dung thư (MitM), mất trust với các MTA ngoài yêu cầu enforced TLS (Google/Microsoft ngày càng siết), và quan trọng nhất với lab: người dùng **mất kỹ năng nhận diện** cert giả.
+
+**Phòng ngừa.**
+1. Dựng **internal CA trong lab** (openssl một lần, distribute CA cert cho các client lab) thay vì cert tự ký từng server; cấp cert server từ CA đó → người dùng **không có** lý do bấm accept.
+2. Postfix: `smtpd_tls_security_level = may`, `smtpd_tls_auth_only = yes`, `smtpd_tls_protocols = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1`; Dovecot: `ssl = required`, `ssl_min_protocol = TLSv1.2`.
+3. Với phía gửi giữa server–server: cân nhắc `smtp_tls_security_level = dane` hoặc tối thiểu `verify/full` khi cả hai có cert hợp lệ.
+4. Audit định kỳ bằng `openssl s_client` trong lab (chỉ với IP của lab!); đặt lịch nhắc đổi cert ít nhất 30 ngày trước khi hết hạn (hoặc cert nội bộ thời hạn ngắn + script gia hạn).
+5. "HSTS-style": ở cổng submission (587) **từ chối AUTH khi chưa có TLS** — như trên, `smtpd_tls_auth_only` — để không tồn tại "chế độ plaintext tiện lợi".
+
+**Nguồn:**
+- RFC 8996 — Deprecating TLS 1.0/1.1: https://www.rfc-editor.org/info/rfc8996
+- RFC 7568 — Deprecating SSLv3: https://www.rfc-editor.org/info/rfc7568
+- RFC 7465 — Prohibiting RC4: https://www.rfc-editor.org/info/rfc7465
+- RFC 3207 — STARTTLS in SMTP: https://www.rfc-editor.org/info/rfc3207
+- Postfix TLS Readme: https://www.postfix.org/TLS_README.html
+- Dovecot SSL configuration: https://doc.dovecot.org/latest/core/config/ssl.html
+
+---
+
+### 7. Phần mềm lỗi thời và cấu hình mặc định
+
+**Nguyên nhân.** Hai thói quen "mặc nhiên an toàn" nhưng sai: **để phần mềm cũ chạy** và **tin cấu hình default**. Về phần mềm cũ: CVE **tích tụ** theo thời gian — một phiên bản Postfix/Dovecot/vsftpd/OpenSSH đứng yên một năm nghĩa là bỏ lỡ toàn bộ bản vá của năm đó. Ví dụ kinh điển đã kiểm chứng để minh họa cho rủi ro "phần mềm không vá": **vsftpd 2.3.4 (CVE-2011-2523, CVSS 10)** — bản phân phát bị cài backdoor mở shell cổng 6200 từ 30/6–3/7/2011; trở thành ví dụ dạy học nổi tiếng (Metasploitable 2) đúng vì nó cho thấy chỉ cần **một bản tải không rõ nguồn** là cả hệ thống mất tin cậy. Ở phía mail, họ Exim có hàng loạt CVE nghiêm trọng (2019: RCE CVE-2019-10149 "The Return of the WIZard" cùng CVE-2019-15846, CVE-2019-16928; 2024: CVE-2023-51766 SMTP smuggling) và OpenSSH/vsftpd/Dovecot/Postfix đều nhận các bản vá bảo mật phát hành liên tục qua kênh cập nhật của distro — điều này khẳng định: **delay-upgrade = tự tích nợ CVE**. Về vòng đời OS: một bản Ubuntu LTS có hỗ trợ chuẩn 5 năm; tính đến 8/2026 bản LTS hiện hành mới nhất là **Ubuntu 26.04 "Resolute Raccoon" (ra 23/4/2026)**, còn các bản như 20.04 (hỗ trợ chuẩn kết thúc 4/2025) nếu vẫn chạy mà không có Ubuntu Pro/ESM tức là **không còn bản vá an ninh** cho vsftpd/postfix/dovecot cài trên đó.
+
+**Vì sao default không vì security.** Cấu hình mặc định được thiết kế cho **compatibility** (mọi client cũ kết nối được) và **zero-configuration install**: `anonymous_enable=YES` trong `/etc/vsftpd.conf` của vsftpd là ví dụ kinh điển — mặc định để AI cũng download được → mở luôn nguy cơ upload; Postfix may mắn hơn vì default `defer_unauth_destination` an toàn, nhưng đổi lại các bài hướng dẫn trên mạng "sửa giúp hết lỗi relay denied" lại là nguồn cấu hình sai lớn nhất (mục 1). Tóm lại: **default chỉ là điểm khởi đầu, không phải chính sách.**
+
+**Dấu hiệu.** Không có log "bị lỗi thời" — phải tự kiểm:
+```bash
+apt list --upgradable | grep -E "postfix|dovecot|vsftpd|openssh"   # còn bao nhiêu bản vá chờ?
+postfix check        # kiểm cấu hình self-diagnosis
+dovecot -n           # in ra toàn bộ cấu hình đang hiệu lực — đọc lại để tìm default đáng ngờ
+grep -E "ssl_protocols|ssl = " /etc/dovecot/conf.d/10-ssl.conf
+```
+
+**Ảnh hưởng.** RCE làm chủ server (vsftpd 2.3.4), vượt xác thực/giả mạo (SMTP smuggling), hoặc đơn giản là service hết được bảo mật bởi ai đó — vì OS không còn nhận patch.
+
+**Phòng ngừa.**
+1. **unattended-upgrades** cho `*-security` (có sẵn trong Ubuntu, bật qua `sudo apt install unattended-upgrades` + cấu hình `/etc/apt/apt.conf.d/50unattended-upgrades`): server lab không tự vá = chậm hơn khai thác ít nhất một chu kỳ.
+2. Nâng lịch trình OS: kiểm tra EOL của bản đang chạy tại https://ubuntu.com/about/release-cycle và kế hoạch nâng lên bản LTS gần nhất (hiện là 26.04).
+3. Review cấu hình định kỳ bằng **hardening checklist**: `postfix check`, `dovecot -n`, đọc `vsftpd.conf` so với mặc định — ghi diff mỗi lần đổi.
+4. Tải phần mềm **từ repository chính thức của distro**, không từ file `.tar.gz` trôi nổi — chính CVE-2011-2523 là bài học về nguồn phát phần mềm.
+5. Khi migrate (bối cảnh mở đầu mục 1): **không copy `main.cf` cũ nguyên si**; dựng `postconf -n` mới và thêm từng dòng có chủ đích.
+
+**Nguồn:**
+- NVD — CVE-2011-2523 (vsftpd 2.3.4): https://nvd.nist.gov/vuln/detail/CVE-2011-2523
+- NVD — CVE-2019-10149 (Exim "The Return of the WIZard"; advisory gốc của Qualys): https://nvd.nist.gov/vuln/detail/CVE-2019-10149
+- Ubuntu release cycle & EOL: https://ubuntu.com/about/release-cycle
+- Ubuntu 26.04 LTS release notes: https://documentation.ubuntu.com/release-notes/26.04/
+- unattended-upgrades package (Ubuntu): https://packages.ubuntu.com/noble/unattended-upgrades
+
+---
+
+### 4b.5. Tổng kết khung 5 mục (bảng tra nhanh)
+
+| Nguy cơ | Dấu hiệu log đặc trưng nhất | Phòng ngừa chủ lực |
+|---|---|---|
+| Open relay | `Relay access denied` **xuất hiện**; `nrcpt` lớn + `from/`domain lạ | `smtpd_relay_restrictions` giữ nguyên chặn cuối, `mynetworks` hẹp |
+| Spoofing/phishing | Gần như không log; chỉ thấy khi bật auth-check | SPF/DKIM/DMARC (ch.6) + đào tạo user |
+| Mã độc | `vsftpd [pid] UPLOAD: *.exe`; clamav FOUND | `noexec`, tắt anon write, ClamAV + EICAR test |
+| Lạm dụng AUTH | Spike `sasl_username=` cùng recipient xa | anvil rate limit + volume alert + MFA/app-password |
+| DoS | `bad command startup -- throttling`; `status=deferred` hàng loạt | connection rate limit, queue lifetime 1d, `ufw limit`, fail2ban |
+| TLS sai | Không có "TLS connection established" cho session; `Login:` thiếu `TLS` | Internal CA, `ssl = required`, `smtpd_tls_auth_only`, bỏ TLS<1.2 |
+| Lỗi thời/default | `apt list --upgradable` còn tồn đọng; `dovecot -n` lộ default | unattended-upgrades, theo EOL (26.04 LTS từ 4/2026), review checklist |
+
+Chương 5 tiếp theo sẽ chuyển sang phía **phát hiện sớm** (giám sát log chủ động, IDS, baseline) dựa chính xác trên các dấu hiệu log đã liệt kê ở đây.
+
+---
+
+## 5. Kỹ thuật phát hiện sớm qua log và metric
+
+Mục tiêu của chương này là trả lời câu hỏi: **làm sao biết hệ thống FTP/SFTP, SMTP, POP3, IMAP của mình đang bị dòm ngó sớm nhất có thể**, trước khi thiệt hại xảy ra (tài khoản bị chiếm, mail bị gửi lậu, dữ liệu bị lấy đi). Ý tưởng cốt lõi rất đơn giản: mọi hành vi — dù là người dùng hợp lệ hay kẻ tấn công — đều để lại dấu vết trong nhật ký hệ thống (log) và trong các đại số đo được (metric) như số kết nối mỗi phút, độ sâu hàng đợi mail. Phát hiện sớm = biến các dấu vết đó thành cảnh báo có ngưỡng, và xử lý cảnh báo nhầm cho gọn dần theo thời gian.
+
+Toàn bộ kỹ thuật trong chương được minh họa trong **lab mạng riêng do nhóm sở hữu** (máy ảo Ubuntu dựng ở các chương trước). Trong lab, nhóm vừa là "quản trị" vừa đóng vai "người dùng hợp lệ" và "kẻ tấn công" (chạy các công cụ dò mật khẩu như hydra/medusa chỉ trên máy của mình, đã kiểm soát) để tạo log thật rồi quan sát hệ thống phát hiện. Không áp dụng các thao tác này lên hệ thống công cộng.
+
+Với **mỗi hành vi bất thường**, chương trình bày đủ 4 vế theo một khuôn chung:
+
+1. **Cách phát hiện**: lệnh `grep`/`journalctl`/bộ lọc Fail2ban/đồ thị metric đơn giản;
+2. **Cặp log mẫu "bình thường vs đáng ngờ"** — đúng định dạng syslog thực tế mà dịch vụ sinh ra;
+3. **Ngưỡng đề xuất ban đầu** kèm biện luận tại sao chọn con số đó;
+4. **False positive (dương tính giả — cảnh báo nhầm)** có thể xảy ra và cách chỉnh ngưỡng.
+
+### 5.1 Chuẩn bị: các dịch vụ ghi log vào đâu
+
+Trên Ubuntu Server LTS (bản hành hiện nay là **26.04 LTS "Resolute Raccoon"**, phát hành 23/4/2026; bản 24.04 LTS vẫn được hỗ trợ song song), các daemon mạng ghi log theo chuẩn syslog — dòng log có dạng:
+
+```
+Tháng  Ngày  Giờ   hostname  tên_tiến_trình[PID]: nội dung
+```
+
+Ví dụ thật: `Aug 29 10:15:02 mailserver postfix/smtpd[1234]:` — ngày tháng kiểu `MMM DD HH:MM:SS` (định dạng syslog BSD cổ điển, RFC 3164; bản hiện đại là RFC 5424 nhưng file log cục bộ vẫn dùng kiểu cũ).
+
+Mặc định, rsyslog nhận log từ journald rồi gom vào các file ở `/var/log`. Bảng nguồn log cần nhớ:
+
+| Dịch vụ | Ghi vào đâu (mặc định Ubuntu) | Ghi chú bật thêm |
+|---|---|---|
+| vsftpd (FTP) | `/var/log/auth.log` (dòng PAM `pam_unix(vsftpd:auth)` — có sẵn khi xác thực fail) | Bật `syslog_enable=YES` → message riêng của vsftpd ghi qua **facility `ftp`**, rsyslog mặc định của Ubuntu đưa vào `/var/log/syslog` (chứ không phải auth.log); bật `dual_log_enable=YES` → có thêm `/var/log/vsftpd.log` dễ đọc hơn, và `xferlog_enable=YES` → `/var/log/xferlog` cho nhật ký chuyển file |
+| OpenSSH/SFTP | `/var/log/auth.log` | SFTP đi qua `sshd` nên dùng chung một nguồn log |
+| Postfix (SMTP) | `/var/log/mail.log` | Mặc định đã ghi rất chi tiết |
+| Dovecot (POP3/IMAP) | `/var/log/mail.log` | Thêm `auth_verbose = yes` để log rõ lý do fail xác thực |
+
+Hai điểm dễ vấp trong lab:
+
+- Nếu cài Ubuntu bằng **bản ảnh "minimized"** (tối giản), rsyslog **không được cài sẵn** — không có `/var/log/auth.log` hay `/var/log/mail.log`, mọi thứ chỉ nằm trong journald. Cách xử lý: `apt install rsyslog && systemctl enable --now rsyslog`, hoặc dùng thẳng `journalctl`.
+- Journald (systemd journal) là bản gốc của mọi log; đọc trực tiếp bằng:
+
+```bash
+journalctl -u ssh -u postfix -u dovecot --since "10 min ago"   # log 3 dịch vụ, 10 phút qua
+journalctl -t sshd -p warning --since today                     # chỉ message mức warning trở lên
+journalctl -f                                                 # theo dõi trực tiếp (giống tail -f)
+```
+
+Trong lab phần lớn ví dụ dùng `grep`/`awk` trên file text cho dễ quan sát; khi ra môi trường thật với nhiều máy, nên gom log về một chỗ (rsyslog gửi UDP/TCP đi, hoặc SIEM — xem 5.10).
+
+Nguồn:
+- https://documentation.ubuntu.com/release-notes/26.04/ (phiên bản LTS hiện hành)
+- https://www.rfc-editor.org/rfc/rfc5424 (định dạng syslog)
+- https://manpages.ubuntu.com/manpages/noble/man5/vsftpd.conf.5.html (các tham số log của vsftpd)
+
+### 5.2 Nhiều lần đăng nhập thất bại từ một IP (brute-force)
+
+**Bản chất.** Đây là tín hiệu cổ điển nhất: kẻ tấn công dùng danh sách mật khẩu (password spraying) hoặc dictionary để thử đăng nhập. Đặc trưng máy móc của nó: **tốc độ** — một script có thể thử hàng chục lần mỗi phút, trong khi người dùng thật gõ sai lắm cũng 2–3 lần trong vài chục giây rồi dừng lại nghĩ.
+
+**Cách phát hiện.** Quan sát theo cặp IP nguồn ↔ số lần fail:
+
+```bash
+# Đếm số lần "Failed password" theo IP nguồn trong auth.log hiện hành (sshd)
+grep "Failed password" /var/log/auth.log | awk '{for(i=1;i<=NF;i++) if($i=="from") print $(i+1)}' \
+  | sort | uniq -c | sort -rn | head -10        # top 10 IP fail nhiều nhất
+```
+
+Với Fail2ban, đây chính là việc của nó — không cần tự viết lệnh (cấu hình mẫu ở 5.10).
+
+**Cặp log mẫu.** sshd (SFTP):
+
+```log
+# BÌNH THƯỜNG — một phiên đăng nhập hợp lệ:
+Aug 29 10:16:10 server sshd[4010]: Accepted password for bob from 192.168.1.50 port 50000 ssh2
+# ĐÁNG NGỜ — cùng IP này 2 giây sau lại fail, lặp hàng chục lần liên tiếp:
+Aug 29 10:15:02 server sshd[4001]: Failed password for bob from 203.0.113.7 port 51234 ssh2
+```
+
+vsftpd (dòng PAM trong `/var/log/auth.log` — chính là mẫu regex `authentication failure; ... tty=ftp ruser=<...> rhost=<HOST>` của filter vsftpd trong Fail2ban):
+
+```log
+Aug 29 10:15:02 ftpserver vsftpd[2041]: pam_unix(vsftpd:auth): authentication failure; logname= uid=0 euid=0 tty=ftp ruser=bob rhost=203.0.113.7
+```
+
+và khi bật `dual_log_enable=YES`, `/var/log/vsftpd.log` có dòng gọn hơn — chú ý dòng này dùng định dạng ctime (thứ + ngày + giờ + **năm**, không có tên hostname/PID kiểu syslog) và IP đặt trong nháy kép **không** có dấu nhọn (dấu `<HOST>` trong filter fail2ban chỉ là placeholder, không phải nội dung log):
+
+```log
+Sat Aug 29 10:15:02 2026 [pid 2041] [bob] FAIL LOGIN: Client "203.0.113.7"
+```
+
+Dovecot (POP3/IMAP) trong `/var/log/mail.log` — từ khóa `Disconnected (auth failed, N attempts in N secs)`:
+
+```log
+Aug 29 10:15:02 mailserver dovecot: pop3-login: Disconnected (auth failed, 1 attempts in 2 secs): user=<bob>, method=PLAIN, rip=203.0.113.7, lip=10.0.0.5, TLS, session=<Kx7f2p9q>
+# so với dòng thành công:
+Aug 29 10:16:10 mailserver dovecot: imap-login: Login: user=<bob>, method=PLAIN, rip=192.168.1.50, lip=10.0.0.5, mpid=2101, TLS, session=<Qw1t8z3x>
+```
+
+Chú ý: `Disconnected (auth failed, 1 attempts in 2 secs)` **có chủ ý ghi cả số lần thử và thời gian** — do đó khi điều tra, nhìn trường `rip=` (remote IP) và đếm là đủ, không cần tự gom dòng.
+
+Postfix dùng cho đăng nhập SMTP có xác thực (SASL) — dòng fail nằm ở `mail.log`:
+
+```log
+Aug 29 10:15:02 mailserver postfix/smtpd[3010]: warning: unknown[203.0.113.7]: SASL LOGIN authentication failed: UGFzc3dvcmQ6
+```
+
+**Ngưỡng khởi điểm.** Theo yêu cầu đề bài, ngưỡng mẫu rất gắt: **`findtime = 60` (giây), `maxretry = 5`, `bantime = 3600`** — tức 5 lần sai trong 1 phút thì chặn 1 giờ. Biện luận: tốc độ này loại trừ hoàn toàn con người (5 lần gõ sai liên tiếp trong 60s là phi thực tế), nhưng script brute-force thông thường hàng trăm lần/phút vẫn bị bắt thừa sức. Giá trị gốc của Fail2ban trong `jail.conf` mặc định lỏng hơn — `bantime = 10m, findtime = 10m, maxretry = 5` (5 lần/10 phút) — phù hợp làm ngưỡng "an toàn" khi chưa quen log. Khuyến nghị của đồ án: bắt đầu bằng 5/10 phút, siết dần về 5/60s cho dịch vụ công cộng sau 2 tuần quan sát không có cảnh báo nhầm.
+
+**False positive và cách chỉnh.** (1) Người dùng thật bật chế độ Caps Lock, hoặc gõ nhầm mật khẩu cũ đã đổi → 5 lần fail liên tục trong chưa đầy 1 phút. (2) Ứng dụng nội bộ dùng mật khẩu đã hết hạn (script cũ, máy scan "quét" SMTP bằng credential cũ) → fail đều đặn theo cron, vô hạn. Xử lý: `ignoreip` cho dải nội bộ và IP ứng dụng trong `jail.local`; cân nhắc bỏ chặn tự động, chỉ "gắn nhãn" (alert) để người quản trị xác nhận; với mail client người dùng sai persistent thì hướng dẫn lưu lại mật khẩu mới — giảm nguồn cảnh báo nhầm tốt nhất là giảm lý do fail thật.
+
+Nguồn:
+- https://github.com/fail2ban/fail2ban/blob/master/config/filter.d/vsftpd.conf (regex `FAIL LOGIN`, `authentication failure`)
+- https://github.com/fail2ban/fail2ban/blob/master/config/filter.d/dovecot.conf
+- https://github.com/fail2ban/fail2ban/blob/master/config/filter.d/sshd.conf
+- https://github.com/fail2ban/fail2ban/blob/master/config/jail.conf (giá trị mặc định DEFAULT)
+
+### 5.3 Một IP thử nhiều tài khoản khác nhau (username enumeration / credential stuffing)
+
+**Bản chất.** Hai biến thể: *username enumeration* — kẻ tấn công thăm dò tên tài khoản nào tồn tại (để sau này đánh vào đó); *credential stuffing* — dùng danh sách cặp user:pass bị lộ từ vụ khác, thử lần lượt nhiều user trên hệ thống của mình (mỗi user đúng 1 lần thì không chạm ngưỡng 5-lần/1-phút của mục 5.2 — chính vì vậy cần một phép đếm khác). Chỉ báo: **số tài khoản distinct (không lặp) mà một IP nguồn chạm tới**, chứ không phải tổng số lần fail.
+
+**Cách phát hiện.** Đếm distinct users theo từng IP nguồn trong cửa sổ 10 phút (đọc `ruser=`, `user=<...>`, `for ... from`, `rhost=`):
+
+```bash
+# Ví dụ với dovecot: tách cặp (rip, user) rồi đếm user khác nhau mỗi IP, 10 phút qua
+journalctl -u dovecot --since "10 min ago" -o cat --no-pager \
+ | grep "Disconnected" \
+ | sed -nE 's/.*user=<([^>]+)>.*rip=([0-9.:]+).*/\2 \1/p' \
+ | sort -u | awk '{print $1}' | sort | uniq -c | sort -rn | head
+# Cột đầu = số user khác nhau thử từ IP đó (mỗi dòng rip-user chỉ đếm 1 lần nhờ sort -u)
+```
+
+Ở môi trường thật, phép "distinct count theo nhóm" này là thứ mà SIEM hoặc truy vấn Graphite/Prometheus (count unique per label) làm tự nhiên hơn awk; trong lab thì awk đủ.
+
+**Cặp log mẫu.** Bình thường: hai IP nội bộ, mỗi IP một user (`rip=192.168.1.50 user=<bob>` rồi lặp lại cùng cặp). Đáng ngờ:
+
+```log
+Aug 29 10:15:02 mailserver dovecot: imap-login: Disconnected (auth failed, 1 attempts in 2 secs): user=<admin>, method=PLAIN, rip=203.0.113.7, lip=10.0.0.5, TLS
+Aug 29 10:15:03 mailserver dovecot: imap-login: Disconnected (auth failed, 1 attempts in 2 secs): user=<test>,  method=PLAIN, rip=203.0.113.7, lip=10.0.0.5, TLS
+Aug 29 10:15:04 mailserver dovecot: imap-login: Disconnected (auth failed, 1 attempts in 2 secs): user=<oracle>, method=PLAIN, rip=203.0.113.7, lip=10.0.0.5, TLS
+```
+
+Cùng một `rip=` nhưng `user=<...>` đổi liên tục, mỗi user đúng 1 lần — "trải thảm" (spraying). Tương tự với vsftpd: `[pid ...] [admin] FAIL LOGIN`, rồi `[test] FAIL LOGIN`, cùng `Client "203.0.113.7"`.
+
+**Ngưỡng khởi điểm.** Khuyến nghị: **≥10 user distinct từ 1 IP trong 10 phút → cảnh báo; ≥25 → cảnh báo khẩn**. Biện luận: một IP công cộng lạ không có lý do chính đáng nào chạm >2–3 tên tài khoản trong 10 phút (kèm hầu hết fail); ngưỡng 10 tạo biên độ an toàn, còn mức 25 gần như chắc chắn là tự động hóa. Có thể kết hợp điều kiện "tỉ lệ fail ≥80%" để loại trừ trường hợp hiếm hoi một kỹ thuật viên helpdesk reset mật khẩu hộ 5–6 user trong ca trực (các lần đó thường *thành công*).
+
+**False positive và cách chỉnh.** Kẻ thù số một của phép đếm này là **NAT**: một IP công ty (vài trăm nhân viên ra internet chung một IP) dễ dàng chạm ngưỡng "nhiều user". Xử lý đúng quy trình: (1) tra xem IP có thuộc dải của khách hàng/đối tác/VPN công ty không; (2) có thì cho vào danh sách trắng (`ignoreip`, hoặc bộ lọc riêng) và **thay vào đó giám sát theo user** (mục 5.4) vì IP đã mất khả năng định danh; (3) hoặc nâng ngưỡng riêng cho các IP đã whitelist thành 100+ user/10 phút. Cũng nhớ IPv6: mỗi thiết bị di động trong cùng mạng 3G/4G có thể có cả một dải /64 — cân nhắc chặn theo prefix chứ không phải /128.
+
+Nguồn:
+- https://github.com/fail2ban/fail2ban/blob/master/config/filter.d/dovecot.conf (trường user/rip trong log dovecot)
+- https://www.rfc-editor.org/rfc/rfc1939, https://www.rfc-editor.org/rfc/rfc9051 (ngữ cảnh POP3/IMAP login)
+
+### 5.4 Một tài khoản xuất hiện ở nhiều IP hoặc giờ bất thường
+
+**Bản chất.** Ba mục trên nhìn theo trục IP; mục này lật trục lại: **phân tích theo user**. Khi kẻ tấn công đã có một cặp credential hợp lệ (từ phishing, từ stuffing thành công), mọi login của họ đều "đúng mật khẩu" — không có dòng fail nào cả. Chỉ còn bất thường về **ngữ cảnh**: một người không thể ở Hà Nội lúc 02:00 và ở một châu lục khác lúc 02:05 (impossible travel), và một kế toán không đăng nhập IMAP lúc 3 giờ sáng trong khi suốt 2 tuần chỉ hoạt động 8h–17h.
+
+**Cách phát hiện.** Đếm distinct IP theo user, và so khớp khung giờ:
+
+```bash
+# Dovecot: user nào đến từ nhiều IP trong 5 phút?
+journalctl -u dovecot --since "5 min ago" -o cat --no-pager | grep "Login:" \
+ | sed -nE 's/.*user=<([^>]+)>.*rip=([0-9.:]+).*/\1 \2/p' \
+ | sort -u | awk '{print $1}' | sort | uniq -c | sort -rn | head
+# Cột đầu = số IP khác nhau của user đó. Cảnh báo: >= 3
+# (vsftpd/sshd: tách cặp theo ruser=...rhost=... / "for <user> from <ip>" — cùng nguyên tắc)
+```
+
+**Cặp log mẫu.** Bình thường (bob trên điện thoại + laptop, 2 IP nội bộ, cách nhau 40 phút):
+
+```log
+Aug 29 08:10:00 mailserver dovecot: imap-login: Login: user=<bob>, method=PLAIN, rip=192.168.1.50, lip=10.0.0.5, mpid=2101, TLS, session=<A1>
+Aug 29 08:50:12 mailserver dovecot: imap-login: Login: user=<bob>, method=PLAIN, rip=192.168.1.51, lip=10.0.0.5, TLS, session=<A2>
+```
+
+Đáng ngờ — cùng user trong 5 phút, 4 IP ở 4 nước khác nhau, rồi nối tiếp toàn hoạt động 02:00–03:00 sáng:
+
+```log
+Aug 29 10:15:01 mailserver dovecot: imap-login: Login: user=<alice>, method=PLAIN, rip=198.51.100.23, lip=10.0.0.5, TLS, session=<B1>
+Aug 29 10:17:44 mailserver dovecot: imap-login: Login: user=<alice>, method=PLAIN, rip=203.0.113.44, lip=10.0.0.5, TLS, session=<B2>
+Aug 29 10:19:50 mailserver dovecot: imap-login: Login: user=<alice>, method=PLAIN, rip=192.0.2.77,   lip=10.0.0.5, TLS, session=<B3>
+```
+
+Ba `rip=` thuộc ba block địa chỉ khác nhau liên tiếp trong vòng chưa đầy 5 phút — thời gian bay giữa các nước không cho phép.
+
+**Ngưỡng khởi điểm.** Hai luật độc lập, mỗi luật đủ để cảnh báo: (a) **≥3 IP distinct trong 5 phút cho cùng một user** (không tính các IP đã biết của user đó); (b) **thành công đăng nhập ngoài khung giờ baseline** — baseline = khoảng giờ hoạt động của chính user đó trong 2 tuần gần nhất, nới thêm ±2 giờ. Biện luận: 2 IP là chuyện bình thường (wifi + 4G); IP thứ 3 trong vài phút thì rất khó giải thích.
+
+**False positive và cách chỉnh.** Roaming quốc tế thật (sai giờ địa phương — hãy quy log về UTC rồi so với múi giờ *khai báo* của người dùng, không phải giờ máy chủ); mail client trên điện thoại tự đồng bộ đẩy cả laptop + desktop + watch (có thể thành 3 IP nếu dùng cả 4G và wifi, hoặc IPv4 + IPv6 của cùng một thiết bị). Vì vậy luật này chỉ nên **cảnh báo (alert)**, không bao giờ tự động chặn — người quản trị hoặc chính chủ tài khoản xác nhận qua kênh khác (kênh phụ: hỏi thẳng, SMS, chat). Kèm theo đó, bật thêm tín hiệu "đăng nhập thành công ngay sau khi đổi mật khẩu từ IP lạ" — chuỗi hành vi kinh điển của chiếm tài khoản.
+
+Nguồn:
+- https://github.com/fail2ban/fail2ban/blob/master/config/filter.d/dovecot.conf (mẫu log `Login:` / `Disconnected`)
+- https://doc.dovecot.org/ (cấu hình log của Dovecot)
+
+### 5.5 Volume tăng đột biến so với baseline
+
+**Bản chất.** Brute-force, spam chiến dịch, data exfiltration qua FTP — tất cả đều làm **nhịp lượng** của hệ thống thay đổi: số kết nối mới/phút, số file transfer/phút, số mail chấp nhận/giờ tăng vọt so với chính nó ngày thường. Điểm mấu chốt: ngưỡng không phải một hằng số, mà là **đường cơ sở (baseline) học từ dữ liệu của lab**. Khuyến nghị của đồ án: dùng **trung bình động 2 tuần (moving average)** theo từng khung giờ (hour-of-day), vì lưu lượng mail/FTP có nhịp ngày—đêm rất rõ; cảnh báo khi giá trị hiện tại vượt `baseline + 3×độ lệch chuẩn` (hoặc đơn giản hơn: >5× baseline).
+
+**Cách phát hiện.** Trong lab, đủ bằng awk gom theo phút rồi so; môi trường thật đẩy số liệu vào Graphite/Prometheus để có đồ thị và alert rule.
+
+```bash
+# Số lần login mỗi phút từ vsftpd.log (dual log — dòng "Sat Aug 29 10:15:02 2026 [pid ...]";
+# $2=$3 = "T2 29", $4 = giờ:phút:giây nên cắt 5 ký tự đầu). auth.log không chứa OK/FAIL LOGIN.
+awk '/(OK|FAIL) LOGIN/ {print $2" "$3" "substr($4,1,5)}' /var/log/vsftpd.log \
+ | sort | uniq -c | tail -20      # cột 1 = số login/phút; mắt thường thấy đỉnh bất thường
+```
+
+```bash
+# Mail được chấp nhận (queue ID mới) mỗi 10 phút từ mail.log
+journalctl -u postfix --since "10 min ago" --no-pager -g "postfix/smtpd.*client=" -o short \
+ | wc -l
+```
+
+**Ví dụ log + metric.** Bình thường: mail server của lab chấp nhận ~5 msg/10 phút (vài sinh viên gửi bài, nhận thông báo). Cảnh báo bật khi cửa số hiện tại là 200 msg/10 phút:
+
+```log
+# metric, không phải log: smtpd_accepts_per_10min = 200   (baseline = 5, ngưỡng = 3σ ≈ 40)
+Aug 29 10:15:01 mailserver postfix/smtpd[3301]: connect from unknown[203.0.113.9]
+Aug 29 10:15:02 mailserver postfix/smtpd[3301]: 4F2A1B3C89: client=unknown[203.0.113.9], sasl_method=LOGIN, sasl_username=sv1@lab.local
+Aug 29 10:15:03 mailserver postfix/smtpd[3302]: 4F2A1B40A2: client=unknown[203.0.113.9], sasl_method=LOGIN, sasl_username=sv1@lab.local
+... (197 dòng tương tự trong 9 phút tiếp theo, cùng 1 tài khoản)
+```
+
+Cùng dạng này cho FTP: baseline upload 1–2 file/tuần thì một đêm `xferlog` ghi 3.000 dòng `OK UPLOAD` là red flag khổng lồ của exfiltration.
+
+**Ngưỡng khởi điểm.** Với hệ thống nhỏ như lab: `>5× baseline` và tối thiểu 50 sự kiện/cửa sổ (tránh cảnh báo 1→5). Biện luận: 5× nằm trên đỉnh dao động tự nhiên (đã nhân 3σ); sàn tuyệt đối 50 loại nhiễu thống kê khi baseline gần 0.
+
+**False positive và cách chỉnh.** Lễ nộp bài tập lớn (sinh viên upload FTP đồng loạt đầu giờ), thứ Hai chiến dịch gửi thư thông báo, kỳ thi (truy vấn IMAP tăng). Đây chính là lúc tính "theo khung giờ" của baseline 2 tuần có giá trị — nếu mọi tuần đều nộp bài thứ Hai 8h, ngày đó không phải outlier; nếu là sự kiện một lần, quản trị tạm time-out cảnh báo và **ghi chú lý do vào ticket** để lần sau đưa vào baseline "có mùa vụ".
+
+Nguồn:
+- https://graphite.readthedocs.io/ (metric + alert theo đường cơ sở); https://prometheus.io/ (thay thế phổ biến)
+- https://www.rsyslog.com/ubuntu-repository/ (đường ống log)
+
+### 5.6 Hàng đợi mail (mail queue) tăng nhanh
+
+**Bản chất.** Mail queue của Postfix phình nhanh khi: (a) mail bị chính sách bên ngoài từ chối và **deferred** — postfix thử lại, queue càng lúc càng dài; (b) máy phát hiện spam bị chặn giữa chừng; (c) có tài khoản nội bộ bị dùng để gửi spam nhưng bị rate-limit. Queue sâu là tín hiệu vừa về an toàn, vừa về vận hành, nên đáng giám sát riêng.
+
+**Cách phát hiện.** Định kỳ bằng cron (mọi 5 phút):
+
+```bash
+postqueue -p | grep -cE '^[0-9A-F]{6,}'          # đếm số message đang chờ (mỗi message 1 dòng queue ID;
+                                                 # hậu tố * = đang transfer, ! = đang giữ)
+# đếm riêng các message defer — dòng lý do "(Deferred: ...)" đi kèm trong block queue ID:
+mailq | grep -c '(Deferred:'
+```
+
+Cảnh báo khi **số message chờ > N (N = 100 cho lab)** hoặc **tốc độ tăng > 50 msg/phút trong 5 phút liên tiếp**, và luôn bắt keyword `deferred` trong log để biết lý do:
+
+```log
+# BÌNH THƯỜNG — gửi thành công sau 1 giây:
+Aug 29 10:16:10 mailserver postfix/smtp[3100]: 4F2A1B3C89: to=<nguoinhan@other.example>, relay=smtp.other.example[192.0.2.99]:25, delay=0.83, delays=0.1/0.02/0.3/0.4, dsn=2.0.0, status=sent (250 Ok)
+# ĐÁNG NGỜ — message kẹt lại vì từ ngoài từ chối (450 = tạm thời, sẽ defer):
+Aug 29 10:15:02 mailserver postfix/smtp[3100]: 4F2A1B3C89: to=<x@other.example>, relay=smtp.other.example[192.0.2.99]:25, delay=1800, delays=0.5/0.1/1790/9.4, dsn=4.0.0, status=deferred (host smtp.other.example[192.0.2.99] said: 450 4.7.1 Service unavailable; Client host [203.0.113.9] blocked using Spamhaus)
+```
+
+Biện luận ngưỡng: 100 message deferred nghĩa là 100 người nhận đang chờ và hệ thống đã cố gửi suốt ~15–30 phút không xong (mặc định Postfix thử lại mỗi 1000s ở lần đầu); nếu queue một lúc rồi tự tiêu = sự cố mạng thoáng qua (FP); nếu queue tăng đều + nguyên nhân `blocked using ...` hoặc `550 User unknown` hàng loạt = **nội bộ đang bị lợi dụng để spam ra ngoài và bị các MTA khác chặn** — kiểm tra ngay `sasl_username` của các message deferred đó.
+
+**False positive.** Máy chủ nhận vừa bị mất đường truyền internet (toàn bộ queue "treo", lý do `connect to ... timed out`) — phân biệt bằng cách xem message lý do: `timed out/connection refused` (vận hành) vs `blocked/rejected/unavailable` (an toàn). Cron chỉ đếm theo thời gian không phân biệt, nên cảnh báo cần in kèm top 10 lý do defer.
+
+Nguồn:
+- https://www.postfix.org/postqueue.1.html (lệnh postqueue)
+- https://www.postfix.org/SMTPD_ACCESS_README.html (các reason từ chối)
+
+### 5.7 Hành vi relay trái phép bị (hoặc không bị) chặn
+
+**Bản chất.** Relay mở (open relay) là cấu hình sai lầm chết người của SMTP: máy cho phép người lạ gửi mail đến **địa chỉ thuộc domain khác** — kẻ spam biến server của bạn thành bàn đạp, và hệ quả trước mắt là tên miền/IP vào blacklist. Tin tốt: cấu hình mặc định của Postfix hiện đại **từ chối** relay kiểu đó (`Relay access denied`). Hai mức cảnh báo phải phân biệt:
+
+- Có dòng `reject: RCPT ... Relay access denied` trong log = **ai đó ĐANG thử relay** → tín hiệu *tốt* (đã chặn), nhưng cần biết ai, bao nhiêu lần.
+- Có message **thành công** (`status=sent`) với người nhận ngoài domain từ client **không qua SASL** = **cấu hình relay hỏng** → nghiêm trọng, phải gọi điện (double alert).
+
+**Cách phát hiện.** Đếm theo src IP:
+
+```bash
+# Ai bị từ chối relay nhiều nhất trong ngày?
+journalctl -u postfix --since today --no-pager -g "Relay access denied" \
+ | grep -oP '\[\K[0-9.]+(?=\])' | sort | uniq -c | sort -rn | head
+```
+
+**Cặp log mẫu.**
+
+```log
+# BỊ CHẬN — postfix/smtpd từ chối relay (mẫu này match filter postfix mode "normal" của Fail2ban):
+Aug 29 10:15:02 mailserver postfix/smtpd[3010]: NOQUEUE: reject: RCPT from unknown[203.0.113.7]: 554 5.7.1 <congnhan@other.example>: Relay access denied; from=<promo@spam.example> to=<congnhan@other.example> proto=ESMTP helo=<SPAMHOST>
+# LỖ HỔNG — relay thành công cho người nhận ngoài mà không có sasl_username nào ở dòng client=:
+Aug 29 10:16:10 mailserver postfix/smtpd[3050]: 5A9C2D1E77: client=unknown[203.0.113.7]
+Aug 29 10:16:11 mailserver postfix/smtp[3100]: 5A9C2D1E77: to=<congnhan@other.example>, relay=smtp.other.example[192.0.2.99]:25, delay=1.2, delays=0.3/0.1/0.6/0.2, dsn=2.0.0, status=sent (250 Ok)
+```
+
+(mã trạng thái `554 5.7.1` là enhanced status code theo RFC 3463, lớp 5 = từ chối dứt khoát, thuộc SMTP — RFC 5321).
+
+**Ngưỡng khởi điểm.** (a) `Relay access denied` xuất hiện **≥1 lần** → ghi nhận (mức info, để thống kê); **>30 lần/giờ từ 1 IP** → cảnh báo (đang bị "băm" vào cửa, nên để Fail2ban chặn luôn IP đó). (b) `status=sent` tới domain ngoài mà `client=` không kèm `sasl_username=` → **cảnh báo nghiêm trọng ngay lần đầu, không ngưỡng** — số lượng = 0 mới là bình thường. Biện luận: sự kiện (a) là hành vi kẻ quét internet nền (mỗi IP scan toàn cầu sẽ gặp server của bạn một lần — 1–2 lần/ngày là nhiễu), còn (b) là lỗi cấu hình nghiêm trọng nên không có "ngưỡng chấp nhận".
+
+**False positive và cách chỉnh.** IP nội bộ (printer, scanner, hệ thống cũ khai báo sai `mynetworks`) bị từ chối relay vì quên thêm vào `mynetworks` → hàng loạt dòng "Relay access denied" nội bộ; xử lý bằng cách thêm đúng dải vào cấu hình, đồng thời `ignoreip` dải đó trong jail. Với luật (b): một vài application hợp lệ gửi mail qua server không cần auth vì được đặt trong `mynetworks` — khi đó luật phải viết là "client **không thuộc** `mynetworks` mà vẫn gửi ra ngoài thành công".
+
+Nguồn:
+- https://www.postfix.org/SMTPD_ACCESS_README.html
+- https://github.com/fail2ban/fail2ban/blob/master/config/filter.d/postfix.conf
+- https://www.rfc-editor.org/rfc/rfc5321 ; https://www.rfc-editor.org/rfc/rfc3463
+
+### 5.8 Dịch vụ dừng/khởi động lại bất thường
+
+**Bản chất.** Một attacker chiếm quyền có thể tắt dịch vụ (dDoS ứng dụng, che giấu), hoặc một tiến trình bị crash vì exploit/oom. Hệ thống giám sát phải phân biệt được "tắt do quản trị" và "tắt không ai biết".
+
+**Cách phát hiện.** Kết hợp (1) watchdog của systemd qua `journalctl`, (2) kiểm tra chủ động bằng script/cron hoặc metric `up` của Prometheus (blackbox exporter gửi kết nối thử tới port 21/22/25/110/143 mỗi 30s).
+
+```log
+# Crash — systemd ghi lại nguyên nhân:
+Aug 29 10:15:02 server systemd[1]: dovecot.service: Main process exited, code=killed, status=11/SEGV
+Aug 29 10:15:02 server systemd[1]: dovecot.service: Failed with result 'signal'.
+# Restart loop — dòng "starting up" lặp lại liên tục sau vài giây (dấu hiệu vòng lặp khởi động lại):
+Aug 29 10:15:05 server dovecot: Dovecot v2.3.21 starting up (rps-limit: ...)
+Aug 29 10:15:09 server dovecot: Dovecot v2.3.21 starting up (...)     # ← restart lần 2 trong 4s
+```
+
+Kèm theo là nhóm "cert renewal fail" — Let's Encrypt/certbot gia hạn chứng chỉ TLS không thành công làm các kênh bảo mật (FTPS/IMAPS/SMTP-TLS) sụp dần mà dịch vụ vẫn "up":
+
+```log
+Aug 29 02:00:11 server certbot: 2026-08-29 02:00:11,002:ERROR:acme.challenges:Verification failure
+# hoặc phía postfix báo lỗi khi load chứng chỉ:
+Aug 29 10:15:02 mailserver postfix/smtpd[3010]: fatal: cannot access /etc/ssl/private/ssl-cert-snakeoil.key: No such file or directory
+```
+
+**Cách phát hiện nhanh bằng lệnh:**
+
+```bash
+journalctl --since "24 hours ago" -p err | grep -E "Failed with result|Main process exited"
+systemctl show postfix -p NRestarts --value     # số lần systemd khởi động lại từ khi bật unit
+```
+
+**Ngưỡng khởi điểm.** `NRestarts` tăng >0 ngoài giờ thao tác của nhóm = cảnh báo; restart ≥2 lần/giờ = khẩn. Mọi lần "dừng có chủ đích" phải được log ngược lại bằng cách đối chiếu với lịch bảo trì.
+
+**False positive.** Chính bạn đang `systemctl reload`/`restart` khi triển khai cấu hình, hoặc `apt upgrade` tự restart daemon (unattended-upgrades). Khắc phục bằng quy trình: trước khi bảo trì, đặt dấu im lặng (maintenance window — tắt alert cho unit đó theo thời gian hẹn giờ); đây là quy trình vận hành, không phải chỉnh ngưỡng số.
+
+Nguồn:
+- https://documentation.ubuntu.com/server/how-to/logging/ (journalctl; đường dẫn trang server docs của Ubuntu)
+- https://manpages.ubuntu.com/manpages/noble/man1/systemctl.1.html (trạng thái unit)
+
+### 5.9 File cấu hình bị thay đổi
+
+**Bản chất.** Nhiều cuộc tấn công không cần crash — chỉ cần **sửa một dòng**: mở relay trong `main.cf`, tắt `chroot_local_user` trong `vsftpd.conf`, bật `PermitRootLogin yes` trong `sshd_config`. Phát hiện thay đổi file cấu hình là lớp cuối cùng bắt cả attacker *lẫn* quản trị viên sơ ý.
+
+**Cách phát hiện.** Hai công cụ kinh điển, dùng độc lập hoặc song song:
+
+```bash
+# AIDE: snapshot "hồ sơ" checksum các file hệ thống, sau đó đối chiếu
+apt install aide
+sudo aideinit                                   # tạo DB ban đầu (chạy một lần sau khi hệ thống "sạch")
+sudo aide --check                               # phát hiện file thêm/xóa/sửa — đưa vào cron mỗi ngày
+```
+
+```bash
+# inotifywait: soi realtime các thư mục nhạy cảm
+inotifywait -m -r --timefmt '%F %T' --format '%T %w%f %e' \
+  /etc/vsftpd.conf /etc/postfix /etc/dovecot /etc/ssh/sshd_config \
+  >> /var/log/config-watch.log                  # mỗi dòng = một event MODIFY/CLOSE_WRITE...
+```
+
+**Cặp log mẫu.** Bình thường (sự kiện có chủ đích, đi kèm commit) — dòng đầu là output của `inotifywait` đúng định dạng `--timefmt '%F %T' --format '%T %w%f %e'` đã ghi vào `config-watch.log`; các dòng sau là **báo cáo của `aide --check`** (AIDE không ghi qua syslog mà in báo cáo khi chạy, thường từ cron):
+
+```log
+2026-08-29 09:58:12 /etc/postfix/main.cf CLOSE_WRITE   # đúng lúc bạn đang deploy
+Changed entries:
+  FSF /etc/postfix/main.cf
+    Size   : 24110 -> 24158                             # thêm 48 byte cho cấu hình antispam mới
+```
+
+Đáng ngờ:
+
+```log
+Changed entries:
+  FSF /etc/ssh/sshd_config
+    MD5    : 3f2a1c...d41 -> 8c1d77...9be    # không có ai đăng nhập bảo trì lúc 03:47
+  FSF /etc/postfix/main.cf
+    Line 112:
+    - mynetworks = 127.0.0.0/8 [::ffff:127.0.0.0]/104 [::1]/128
+    + mynetworks = 0.0.0.0/0                 # relay vừa bị mở cho cả thế giới
+```
+
+**Quy trình "mtime + diff vào git".** Biến `/etc` thành repo git (hoặc dùng **etckeeper** — gói đóng sẵn git + hook vào apt): mỗi lần đổi có một commit; commit message quy ước `[change] nội dung + lệnh của quản trị + JIRA ticket`, và một cron `git status` phát hiện dirty file không có commit → cảnh báo. Khi có alert AIDE, việc cần làm đầu tiên là `git diff` để đọc đúng dòng thay đổi.
+
+**Ngưỡng khởi điểm.** Đây là loại cảnh báo **không có ngưỡng số** — *mọi* thay đổi ngoài cửa sổ bảo trì đều phải được giải thích. "Ngưỡng" nằm ở quy trình: thay đổi → phải có commit + message; không có → điều tra.
+
+**False positive.** Bạn tự sửa khi deploy (đúng như đề bài lưu ý): giải quyết bằng quy trình commit message ở trên và bằng cách để script deploy tự động commit với message `[auto-deploy] ...`; ngoài ra apt tự cập nhật có thể sửa file trong `/etc` — etckeeper tự commit các thay đổi loại này với message rõ nguồn.
+
+Nguồn:
+- https://aide.github.io/ ; https://github.com/inotify-tools/inotify-tools
+- https://etckeeper.branchable.com/
+
+### 5.10 Tổng kết: bảng hành vi → log → ngưỡng → hành động, và tự động hóa bằng Fail2ban
+
+Bảng tra nhanh toàn chương — cột "hành động" phân biệt **cảnh báo** (alert để người quản trị xem) và **ban** (chặn tự động, chỉ nên dùng khi độ chắc chắn cao):
+
+| # | Hành vi | Nguồn log | Từ khóa / filter | Ngưỡng khởi điểm | Hành động |
+|---|---|---|---|---|---|
+| 1 | Nhiều lần login fail / 1 IP | auth.log, vsftpd.log, mail.log | `FAIL LOGIN`, `Failed password`, `Disconnected (auth failed`, `SASL ... authentication failed` — filter Fail2ban `vsftpd`,`sshd`,`dovecot`,`postfix` | 5 lần/1–10 phút (jail) | Cảnh báo + **ban IP** (bantime 10m–1h) |
+| 2 | 1 IP thử nhiều tài khoản | như trên, group theo (rip,user) | distinct users / src IP | ≥10 user/10 phút; ≥25 khẩn | Cảnh báo; ban chỉ khi fail rate cao |
+| 3 | 1 tài khoản nhiều IP / giờ lạ | mail.log (Login), auth.log | group theo user; so baseline giờ | ≥3 IP/5 phút; ngoài khung hoạt động | Cảnh báo (không tự ban) |
+| 4 | Volume tăng đột biến | metric từ log (graphite/Prometheus) | kết nối/phút, upload/phút, msg/10 phút | >5× baseline 2 tuần & ≥50 | Cảnh báo |
+| 5 | Queue mail tăng | `postqueue -p`, mail.log | `status=deferred`, đếm queue ID | >100 msg hoặc +50/phút | Cảnh báo + xem lý do defer |
+| 6 | Relay trái phép | mail.log | `Relay access denied` / `status=sent` ngoài domain không SASL | ≥1 lần sent khả nghi = khẩn; >30 denied/giờ/IP | Cảnh báo; double alert khi sent; ban IP probing |
+| 7 | Dịch vụ dừng/restart | journald | `Failed with result`, `NRestarts`, certbot error | mọi restart ngoài kế hoạch | Cảnh báo; khẩn khi loop |
+| 8 | Config bị sửa | AIDE, inotifywait, git | diff `/etc/vsftpd.conf`, `/etc/postfix`, `/etc/dovecot`, `sshd_config` | mọi thay đổi không có commit | Cảnh báo + điều tra |
+
+**Vai trò của Fail2ban.** Các mục 1–3 và một phần 6 là thứ Fail2ban tự động hóa tốt nhất: nó là một daemon đọc log theo `logpath`, khớp các bộ lọc failregex ở mục 5.2–5.3 (chính các file `filter.d/*.conf` mà chương này dùng làm mẫu log thật), đếm sự kiện theo `(IP, cửa sổ)`, và khi vượt `maxretry` thì áp `bantime` qua nftables/iptables. Khung jail mẫu trong `/etc/fail2ban/jail.local`:
+
+```ini
+[DEFAULT]
+bantime  = 1h          # thời gian chặn sau khi vi phạm
+findtime = 60          # cửa sổ đếm sự kiện (siết hơn mặc định 10m của jail.conf)
+maxretry = 5           # 5 lần vi phạm trong cửa sổ => ban
+ignoreip = 127.0.0.1/8 192.168.1.0/24 203.0.113.10   # loopback, dải lab, IP NAT công ty (mục 5.3)
+
+[sshd]                 # SFTP + SSH
+enabled = true
+
+[vsftpd]               # cần dual_log_enable=YES ở vsftpd và trỏ đúng logpath
+enabled  = true
+logpath  = /var/log/vsftpd.log
+
+[dovecot]              # POP3 + IMAP
+enabled = true
+
+[postfix]              # SMTP — chọn mode tùy thứ muốn chặn
+enabled = true
+mode    = aggressive   # mode='normal' chỉ khớp các dòng 'reject:' (Relay access denied, ...);
+                       # 'aggressive' khớp thêm 'SASL ... authentication failed' và pattern ddos
+```
+
+```bash
+fail2ban-client status sshd          # IP nào đang bị chặn, bao nhiêu lần
+fail2ban-client set sshd unbanip 203.0.113.7   # gỡ khi phát hiện chặn nhầm (FP)
+```
+
+Lưu ý thực tế: nếu lab cài bản minimized không có auth.log, đặt `backend = systemd` để Fail2ban đọc thẳng journald thay vì file.
+
+**Điều quan trọng nhất của cả chương.** **Không có ngưỡng nào đúng cho mọi môi trường.** Các con số 5/60s, 10 user/10 phút, 5× baseline chỉ là *điểm xuất phát* để tinh chỉnh (tuning): chạy 1–2 tuần ở mức lỏng, thống kê tỉ lệ cảnh báo nhầm trên log thật của chính hệ thống, rồi siết dần. Giai đoạn đầu, số cảnh báo nhầm nhiều hơn cảnh báo đúng là **bình thường và có ích** — mỗi lần xem xét một FP là một lần hiểu hơn nhịp hoạt động bình thường của hệ thống mình. Song song, nhớ nguyên tắc NIST SP 800-92: log là bằng chứng, phải đồng bộ thời gian (NTP/chrony), giữ an toàn khỏi chính attacker (file chỉ root ghi được, tốt nhất là gửi log ra máy khác ngay — remote syslog), và có thời gian lưu đủ dài.
+
+**Lab vs môi trường thật (giới thiệu ngắn).** Trong lab, `grep` + `awk` + `journalctl` là đủ và giúp hiểu bản chất. Khi có nhiều máy hoặc cần truy vấn tương tác, môi trường thật thường dùng SIEM: **Wazuh** (nguồn mở, có sẵn rule/decoder parse log vsftpd, postfix, dovecot, sshd và liên kết với agent) hoặc **Splunk** (thương mại, tìm kiếm log bằng cú pháp SPL, dashboard metric). Cả hai về bản chất chỉ là "grep + awk + baseline chạy ở quy mô lớn có giao diện"; kỹ thuật phát hiện ở chương này chuyển thẳng sang đó mà không thay đổi logic.
+
+Nguồn:
+- https://github.com/fail2ban/fail2ban (jail.conf, filter.d/*.conf — mẫu log và từ khóa thật)
+- https://github.com/fail2ban/fail2ban/wiki (hướng dẫn backend systemd, jail.local)
+- https://csrc.nist.gov/pubs/sp/800/92/final (NIST SP 800-92 — quản trị log)
+- https://wazuh.com/ ; https://www.splunk.com/
+
+---
+
+## 6. Biện pháp phòng ngừa và gia cố
+
+Chương này tổng hợp các biện pháp **phòng ngừa** (ngăn tấn công xảy ra) và **gia cố** (hardening — thu nhỏ bề mặt tấn công, giảm thiệt hại nếu bị xâm nhập) cho năm dịch vụ mà đồ án quản trị: FTP, SFTP, SMTP, POP3, IMAP. Mỗi biện pháp được trình bày theo cùng một khung: **nguyên lý → ưu điểm → nhược điểm/chi phí → khi nào nên dùng**, đặt trong bối cảnh cụ thể của lab Ubuntu Server mà nhóm vận hành (mạng riêng do nhóm sở hữu, máy chủ `mail.lab.local`, bản Ubuntu 26.04 LTS "Resolute Raccoon" phát hành 23/4/2026, hỗ trợ tiêu chuẩn đến tháng 4/2031).
+
+Nguyên tắc xuyên suốt: không có biện pháp đơn lẻ nào là "viên đạn bạc". An toàn đến từ **phòng thủ nhiều lớp (defense in depth)** — mã hóa kênh truyền + xác thực mạnh + thu hẹp bề mặt tấn công + kiểm soát mạng + giám sát + vận hành kỷ luật. Một biện pháp bị bỏ sót (ví dụ bật TLS nhưng quên tắt cổng plaintext) sẽ mở toang cánh cửa mà các lớp khác vừa khép lại.
+
+### 6.1 Thay FTP bằng SFTP hoặc FTPS
+
+**Nguyên lý.** FTP thuần (RFC 959) truyền **mọi thứ bằng plaintext**: cả lệnh `USER`/`PASS` lẫn dữ liệu file. Bất kỳ ai chặn được gói tin (sniffing trên cùng mạng LAN, switch bị ARP-spoof) đều đọc được mật khẩu và nội dung. Hai giải pháp mã hóa:
+
+- **FTPS (FTP over TLS)**, dạng *explicit* (dùng lệnh `AUTH TLS` nâng cấp kết nối trên cổng 21) được chuẩn hóa trong RFC 4217; dạng *implicit* (TLS ngay từ đầu phiên trên cổng 990) là tập quán di sản, **không** nằm trong RFC 4217 — nên ưu tiên explicit. Bản chất vẫn là giao thức FTP, chỉ bọc thêm lớp TLS.
+- **SFTP (SSH File Transfer Protocol)**, chạy như một *subsystem* của SSH trên **cổng 22**, mã hóa toàn bộ điều khiển + dữ liệu trong đúng một kênh. Lưu ý SFTP **không** phải "FTP chạy trong SSH" — nó là giao thức hoàn toàn khác, chỉ trùng tên viết tắt gần giống.
+
+**So sánh quyết định:**
+
+| Tiêu chí | FTPS | SFTP |
+|---|---|---|
+| Bản chất | FTP + TLS (RFC 4217) | Giao thức riêng của SSH |
+| Cổng firewall | 21 + **dải cổng data** (passive mode) → khó mở tường lửa | **1 cổng duy nhất 22** → firewall-friendly |
+| Mã hóa credentials | Có | Có |
+| Mã hóa dữ liệu | Có (sau khi `AUTH TLS`) | Có (từ đầu đến cuối) |
+| Client/app cũ đã viết cho FTP | **Giữ nguyên**, chỉ bật thêm TLS | **Phải đổi** sang client SFTP (không tương thích FTP) |
+| Chứng thực | Certificate TLS (cần CA/cert) | SSH key hoặc password |
+
+**Ưu điểm.** Cả hai loại bỏ ngay rủi ro lớn nhất của FTP: rò mật khẩu và nội dung khi bị nghe lén. FTPS có lợi thế *tương thích ngược* — ứng dụng/thiết bị đã lập trình theo API FTP chỉ cần bật cờ "Require explicit FTP over TLS" mà không đổi mã. SFTP có lợi thế *vận hành*: chỉ một cổng 22, tích hợp sẵn quản lý key, không phải cấu hình dải cổng passive (vốn là cơn ác mộng với NAT/firewall của FTP/FTPS).
+
+**Nhược điểm/chi phí.** FTP thuần đôi khi **vẫn bắt buộc** cho thiết bị cũ (máy in, máy quét, firmware camera đời cổ) chỉ nói được FTP. FTPS vẫn mang nhược điểm cổng data động của FTP → cấu hình firewall phức tạp. SFTP có **giao tiếp chi phí (handshake overhead)**: thiết lập phiên SSH nặng hơn một kết nối TCP thuần, và quan trọng hơn là **không phải FTP** — công cụ tự động hóa chỉ hiểu cú pháp FTP sẽ phải viết lại. Quản lý chứng chỉ TLS (FTPS) hoặc cặp key (SFTP) là chi phí vận hành phát sinh.
+
+**Khi nào nên dùng.** Mặc định trong lab: **gỡ FTP plaintext, dùng SFTP** cho người dùng tương tác (một cổng, không phải mở dải passive, dùng luôn key SSH đã có). Chọn **FTPS** khi buộc phải giữ một ứng dụng/thiết bị cũ chỉ nói FTP nhưng đã hỗ trợ `AUTH TLS`. Chỉ duy trì FTP thuần khi có thiết bị không còn lựa chọn nào khác — và khi đó phải cô lập nó trong VLAN riêng, không dùng credentials tái sử dụng (xem 6.5, 6.8).
+
+```text
+# Trong lab: tắt hẳn FTP plaintext, chuyển người dùng sang SFTP (cổng 22)
+sudo systemctl disable --now vsftpd        # gỡ dịch vụ FTP khỏi bề mặt tấn công
+# Người dùng chỉ cần: sftp -i ~/.ssh/id_ed25519 user@mail.lab.local
+```
+
+Nguồn:
+- RFC 959 (FTP): https://www.rfc-editor.org/info/rfc959
+- RFC 4217 (FTPS explicit): https://www.rfc-editor.org/info/rfc4217
+- OpenSSH (SFTP subsystem): https://www.openssh.com/
+
+### 6.2 Bắt buộc TLS cho SMTP/POP3/IMAP
+
+**Nguyên lý.** Mặc định SMTP/POP3/IMAP có thể chạy plaintext. Gia cố là **buộc mọi phiên có xác thực đều đi qua TLS**, dùng cơ chế STARTTLS (nâng cấp cổng đang mở) hoặc cổng TLS-riêng (implicit).
+
+Cấu hình Postfix — đặt mức bảo mật TLS cho SMTP:
+
+```ini
+# /etc/postfix/main.cf
+smtpd_tls_security_level = may       # cổng 25: opportunistic TLS (bật nếu peer hỗ trợ)
+# Với cổng submission (587) khai báo trong master.cf:
+#   smtpd_tls_security_level = encrypt   # BẮT BUỘC TLS — từ chối mọi kết nối không TLS
+smtpd_tls_auth_only = yes            # chỉ cho AUTH sau khi đã bật TLS → mật khẩu không bao giờ plaintext
+smtpd_tls_cert_file = /etc/ssl/certs/mail.lab.local.pem
+smtpd_tls_key_file  = /etc/ssl/private/mail.lab.local.key
+```
+
+Hai giá trị quan trọng của `smtpd_tls_security_level` — lưu ý danh sách giá trị hợp lệ **chỉ gồm** `none`, `may`, `encrypt`: **`encrypt`** nghĩa là "chỉ nhận kết nối đã được TLS hóa" (dùng cho submission/MSA); `may` = opportunistic. **"mandatory" không phải một giá trị của tham số này** — "mandatory encryption" chỉ là cách tài liệu Postfix mô tả mức `encrypt`; ở Postfix rất cũ (≤ 2.2), ý "bắt buộc TLS" được đặt bằng tham số `smtpd_enforce_tls = yes` (nay đã deprecated, được thay bằng `smtpd_tls_security_level = encrypt`). Khuyến nghị hiện đại: đặt `encrypt` cho cổng mà người dùng cuối kết nối vào (587/465), và bật **DANE (TLSA)/MTA-STS** khi muốn cưỡng chế ở tầng DNS.
+
+Cấu hình Dovecot — POP3/IMAP:
+
+```ini
+# /etc/dovecot/conf.d/10-auth.conf
+disable_plaintext_auth = yes   # chặn AUTH khi kênh chưa phải TLS (mặc định đã là yes từ 2.3+)
+
+# /etc/dovecot/conf.d/10-ssl.conf
+ssl = required                 # mọi kết nối bắt buộc TLS
+ssl_min_protocol = TLSv1.2     # tắt SSLv3/TLS1.0/1.1 (đã bị coi là không an toàn)
+ssl_dh_params_file = /etc/dovecot/dh.pem
+# Ưu tiên TLS 1.3 khi client hỗ trợ; chỉ cho bộ mã hiện đại (AEAD, forward secrecy)
+# Cú pháp Dovecot: dấu "<" phía trước đường dẫn = đọc nội dung từ file
+ssl_cert = </etc/ssl/certs/mail.lab.local.pem
+ssl_key  = </etc/ssl/private/mail.lab.local.key
+```
+
+Thu hẹp bề mặt bằng cổng: **ngừng mở ra ngoài các cổng plaintext** 143 (IMAP) và 110 (POP3); chỉ giữ các cổng TLS 993 (IMAPS) và 995 (POP3S), cùng 587/465 cho SMTP. Trong `master.cf`/`inet.conf` hoặc bằng UFW (xem 6.8) để 143/110 chỉ binding loopback hoặc đóng hoàn toàn.
+
+**Ưu điểm.** Chống nghe lén và **credential stealing**, chống **downgrade attack** và **MITM** trên LAN. `disable_plaintext_auth` đảm bảo mật khẩu không bao giờ đi trên mạng ở dạng đọc được. `ssl_min_protocol=TLSv1.2` loại các bộ mã đã vỡ (RC4, 3DES, SHA-1, CBC cũ).
+
+**Nhược điểm/chi phí.** **Quản lý chứng chỉ**: cert hết hạn sẽ sập dịch vụ hoặc mở ra cảnh báo — cần theo dõi vòng đời và tự động gia hạn (Let's Encrypt dùng ACME; trong lab tự dựng CA riêng hoặc dùng cert tự ký và import vào client). **Client cũ hỏng**: thiết bị chỉ biết POP3/110 plaintext hoặc chỉ nói được TLS 1.0 sẽ không kết nối được sau khi siết — phải nâng cấp hoặc cách ly. Opportunistic TLS ở cổng 25 không chống được MITM chủ động (chỉ DANE/MTA-STS mới đảm bảo).
+
+**Khi nào nên dùng.** Luôn luôn, cho mọi dịch vụ có xác thực. Đây là biện pháp nền tảng — nếu chỉ được chọn *một* việc để làm trước khi đưa lab vào "production giả lập", hãy chọn bật TLS và tắt cổng plaintext.
+
+Nguồn:
+- Postfix TLS README: https://www.postfix.org/TLS_README.html
+- Dovecot SSL/TLS settings: https://doc.dovecot.org/
+- RFC 8446 (TLS 1.3): https://www.rfc-editor.org/info/rfc8446
+- Bộ mã và giao thức bị deprecated (TLS 1.0/1.1 — RFC 8996): https://www.rfc-editor.org/info/rfc8996
+
+### 6.3 SSH key thay cho mật khẩu (SFTP/SSH)
+
+**Nguyên lý.** Sinh một **cặp khóa (key pair)** gồm *private key* (giữ bí mật ở client) và *public key* (đặt trên server). Server xác minh client chứng minh được sở hữu private key tương ứng, không truyền mật khẩu nào qua mạng.
+
+```bash
+# Trên máy client (lab): tạo khóa ed25519 — ngắn, nhanh, an toàn
+ssh-keygen -t ed25519 -C "an@lab" -f ~/.ssh/id_ed25519
+# Đưa public key lên server, vào file authorized_keys của user
+ssh-copy-id -i ~/.ssh/id_ed25519.pub an@mail.lab.local
+```
+
+Public key được ghi vào `~/.ssh/authorized_keys` trên server — mỗi dòng một key; chỉ key nằm ở đây mới được phép đăng nhập. Private key **không bao giờ** rời máy client.
+
+**Passphrase và ssh-agent.** Private key thường được khóa bằng một **mật khẩu bảo vệ khóa (passphrase)**: nếu file key bị đánh cắp, kẻ tấn công vẫn phải bẻ passphrase. `ssh-agent` giữ key đã mở khóa trong bộ nhớ phiên làm việc, để người dùng nhập passphrase một lần thay vì mỗi lần kết nối.
+
+**Vì sao chống brute-force.** Không thể đoán private key bằng dò vét cạn: key ed25519 nằm trong không gian khóa ~$2^{252}$, và ngay cả RSA-4096 cũng đòi hỏi cỡ $2^{143}$ phép tính ở bài toán phân tích số nguyên tốt nhất hiện nay (NFS) — vượt xa mọi cụm máy chủ có thật. Server có thể **tắt hẳn xác thực bằng mật khẩu**, khi đó Hydra/Medusa (công cụ dò mật khẩu — chỉ dùng trong lab được phê duyệt, không nêu cú pháp) không còn gì để dò. Đây là phòng vệ chủ động: loại bỏ chính phương thức tấn công.
+
+```ini
+# /etc/ssh/sshd_config — chỉ cho phép key, tắt password
+PubkeyAuthentication yes
+PasswordAuthentication no
+PermitEmptyPasswords no
+```
+
+**Nhược điểm/chi phí.** **Quản lý vòng đời key**: thu hồi quyền khi người dùng rời đi đòi phải sửa `authorized_keys`; cần quy trình **key rotation**. **Key bị đánh cắp**: private key không đặt passphrase ≈ mật khẩu mạnh bị lộ — ai có file là đăng nhập được ngay; đó là lý do passphrase gần như bắt buộc. **Onboarding nặng hơn** với người không quen dòng lệnh; key bị hỏng/mất thì phải cấp lại.
+
+**Khi nào nên dùng.** Mặc định cho mọi truy cập SSH/SFTP của quản trị viên và người dùng có thể dùng key. Giữ password (kèm fail2ban + MFA) chỉ cho các workflow tự động không hỗ trợ key hoặc thiết bị giới hạn.
+
+Nguồn:
+- OpenSSH sshd_config man page: https://man.openbsd.org/sshd_config.5
+- Ubuntu Server — SSH: https://documentation.ubuntu.com/server/how-to/security/
+
+### 6.4 Mật khẩu mạnh và xác thực đa yếu tố (MFA)
+
+**Nguyên lý mật khẩu.** Sức chống brute-force của mật khẩu đo bằng **entropy (độ ngẫu nhiên)**, phụ thuộc **chiều dài** hơn là bộ ký tự. `Tr0ub4dour&3` (12 ký tự, độ phức tạp cao) thường **yếu hơn** `correct horse battery staple` (độ dài lớn, dễ nhớ) vì độ dài là số mũ của không gian khóa. Ba quy tắc: đủ dài (khuyến nghị ≥ 14–16 ký tự), **không tái sử dụng** giữa các dịch vụ (một datastore bị lộ → mọi nơi khác bị domino), và **không chứa thông tin cá nhân** dễ đoán. Trong Postfix/Dovecot dùng mật khẩu hệ thống, hãy đặt thuật toán băm mạnh (`doveadm pw -s BLAKE2b-512` hoặc `sha512-crypt`) thay vì băm yếu.
+
+**Nguyên lý MFA.** "Multi-factor authentication" yêu cầu ≥ 2 trong 3 loại bằng chứng: *điều bạn biết* (mật khẩu), *điều bạn có* (điện thoại/token), *điều bạn là* (vân tay). Kẻ tấn công có mật khẩu vẫn chưa vào được nếu thiếu thiết bị.
+
+**Thực tế MFA cho các dịch vụ này — trình bày trung thực.** Đây là điểm dễ bị "hứa hẹn quá đà" trong tài liệu, nên đồ án cần nói rõ:
+
+- **SSH**: MFA **khả thi và phổ biến**. Cài module PAM (Google Authenticator OATH TOTP, hoặc FreeRADIUS) vào `/etc/pam.d/sshd`, đặt `ChallengeResponseAuthentication (KbdInteractiveAuthentication) yes`. **Nhược điểm**: bật 2FA trên SSH sẽ **phá vỡ workflow SFTP-only** — nhiều client SFTP/script tự động không xử lý được bước nhập OTP tương tác, khiến cron/rsync/SCP tự động hóa hỏng.
+- **Dovecot (IMAP/POP3) và Postfix submission**: **MFA gốc rất hạn chế**. Dovecot **không có passdb MFA/OATH/WebAuthn xây sẵn** ở cả bản 2.3 lẫn Dovecot CE 2.4 (tính đến 8/2026 — đã đối chiếu docs chính thức: passdb chỉ có PAM, passwd-file, LDAP, SQL, dict, Lua, OAuth2, checkpassword...). Các cơ chế SASL PLAIN/LOGIN chỉ gửi **một** blob mật khẩu, nên muốn dùng OTP phải *nối password+OTP* hoặc đứng sau một OIDC IdP làm MFA rồi Dovecot xác thực token qua `oauth2` passdb (`oauthbearer`/`xoauth2`) — phức tạp và nhiều mail client không hỗ trợ. Nửa con đường thứ ba: đi qua **PAM passdb + `pam_google_authenticator`**, nhưng khi đó người dùng phải nhập chuỗi *mật khẩu + OTP* gộp chung trong một ô password duy nhất của client — đa số mail client không có bước hỏi OTP tương tác. **Không thể** đặt WebAuthn ngay trên kết nối IMAP/POP3.
+- **FTP**: không có chỗ cho MFA trong giao thức plaintext; FTPS/SFTP cũng chỉ mạnh tới mức của SSH/TLS chứ không phải MFA nội tại.
+
+**Kết luận cho lab này.** "Trong lab, **MFA chỉ khả thi một cách thực tế ở SSH**." Với FTP/IMAP/POP3, thay vì hứa hẹn MFA everywhere, hãy dựa vào **rate limit + fail2ban (6.8) + mật khẩu mạnh + bắt buộc TLS (6.2)**. Nếu buộc phải có lớp hai cho email, con đường đúng là OIDC + app password (mật khẩu riêng cho từng thiết bị), không phải OTP thô trên cổng IMAP.
+
+**Khi nào nên dùng.** Bắt buộc mật khẩu mạnh cho mọi tài khoản còn dùng mật khẩu. Bật MFA trên SSH cho admin; cân nhắc app-password/OAuth2 cho email nếu chấp nhận độ phức tạp; **không cam kết** MFA cho các dịch vụ không hỗ trợ.
+
+Nguồn:
+- Dovecot Authentication (PAM, OAuth2, auth policy): https://doc.dovecot.org/main/core/config/auth/overview.html
+- Dovecot OAuth2 passdb: https://doc.dovecot.org/main/core/config/auth/databases/oauth2.html
+- NIST SP 800-63B (Digital Identity Guidelines — quy tắc mật khẩu): https://pages.nist.gov/800-63-3/sp800-63b.html
+
+### 6.5 Tắt anonymous và các dịch vụ không cần dùng
+
+**Nguyên lý — giảm bề mặt tấn công (attack surface reduction).** Mỗi cổng mở, mỗi tính năng "mặc định bật" là một điểm mà kẻ tấn công có thể thử. Nguyên tắc: **cái gì không dùng thì tắt/gỡ**. vsftpd **mặc định bật anonymous** (`anonymous_enable=YES`) — nếu quên tắt, ai cũng đọc (thậm chí ghi) vào `/var/ftp` mà không cần tài khoản.
+
+```ini
+# /etc/vsftpd.conf
+anonymous_enable=NO        # BẮT BUỘC tắt — giá trị mặc định của vsftpd là YES!
+local_enable=YES
+write_enable=NO            # nếu không thật sự cần upload qua FTP
+```
+
+Audit định kỳ các socket đang lắng nghe:
+
+```bash
+ss -tlnp        # liệt kê TCP LISTEN + tiến trình sở hữu → phát hiện dịch vụ "lạ"
+systemctl list-units --type=service --state=running
+```
+
+Mỗi lần audit: so sánh danh sách cổng đang mở với danh sách *dịch vụ chủ đích cung cấp*. Cổng thừa (ví dụ 3306 MySQL, 6379 Redis, 139/445 Samba) mà không có lý do kinh doanh → **gỡ gói** (`apt remove`) hoặc **dừng + disable** (`systemctl disable --now`).
+
+**Ưu điểm.** Giảm trực tiếp số lỗ hổng có thể bị khai thác — dịch vụ đã gỡ thì không còn CVE nào áp dụng được nữa. Anonymous FTP là kênh kinh điển để host malware/phishing và để lộ dữ liệu; tắt nó loại bỏ rủi ro nghiêm trọng với chi phí bằng 0.
+
+**Nhược điểm/chi phí.** Phải **biết rõ hệ thống chạy gì** — tắt nhầm dịch vụ đang có người dùng phụ thuộc sẽ gây cố ngừng (outage). Cần quy trình ghi nhận "dịch vụ nào được phép" trước khi audit.
+
+**Khi nào nên dùng.** Ngay từ khi dựng lab và lặp lại mỗi lần review cấu hình. Đây là bước **rẻ nhất, hiệu quả cao nhất** trong toàn chương — nên làm đầu tiên.
+
+Nguồn:
+- vsftpd.conf(5) man page: https://linux.die.net/man/5/vsftpd.conf
+- Red Hat — Securing network services: https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/securing_networks/securing-network-services_securing-networks
+- Ubuntu Server — quản lý dịch vụ: https://documentation.ubuntu.com/server/
+
+### 6.6 Chroot cho FTP/SFTP và giới hạn thư mục
+
+**Nguyên lý.** **Chroot** giới hạn tầm nhìn hệ thống file của người dùng trong một thư mục gốc giả — họ không "nhìn thấy" phần còn lại của đĩa. Có hai triển khai cần phân biệt:
+
+**vsftpd (FTP/FTPS):**
+
+```ini
+chroot_local_user=YES         # nhốt mỗi user vào home của chính nó
+allow_writeable_chroot=YES    # CẨN THẬN: cho phép thư mục chroot-root ghi được
+                              # vsftpd mặc định TỪ CHỐI startup nếu chroot root writable
+                              # → chỉ bật khi thật sự cần upload ngay ở gốc
+```
+
+Điều kiện của vsftpd: thư mục gốc chroot **không được writable** theo thiết kế bảo mật. Giải pháp đúng là **thư mục upload riêng**, không cho execute:
+
+```text
+/home/ftpuser/            (root:root, 755 — KHÔNG writable bởi user → vsftpd hài lòng)
+/home/ftpuser/upload/     (ftpuser:ftpuser, 755 — user ghi được vào ĐÂY, không phải gốc)
+```
+
+**SFTP (OpenSSH):** dùng `ChrootDirectory` + `ForceCommand internal-sftp`:
+
+```ini
+# /etc/ssh/sshd_config
+Match Group sftpusers
+    ChrootDirectory /srv/sftp/%u   # BẮT BUỘC: sở hữu root:root, mode 755 (không group/other writable)
+    ForceCommand internal-sftp     # chỉ cho chạy SFTP nội bộ, chặn shell/tunnel
+    AllowTcpForwarding no
+    X11Forwarding no
+```
+
+Ràng buộc then chốt (đã xác minh từ man page): *"all components of the pathname are root-owned directories which are not writable by group or others."* Nghĩa là mọi cấp trong `/srv/sftp/<user>` phải **root-sở hữu và không ghi được bởi group/other** (thường 755); nếu không sshd từ chối chroot → fallback sang shell đầy đủ, hở bảo mật. Người dùng upload vào một thư mục con *writable* bên trong, không phải chính thư mục chroot.
+
+**Ưu điểm.** Cô lập người dùng: user A không đọc được file của user B, không chạm tới `/etc`, không lần ra binary hệ thống để khai thác. `ForceCommand internal-sftp` biến SFTP user thành "chỉ truyền file", không có shell.
+
+**Nhược điểm/chi phí — và giới hạn quan trọng.** **Chroot không phải sandbox.** Nếu người dùng *vừa có shell* *vừa có quyền ghi* trong hệ thống file thực, vẫn tồn tại các kỹ thuật thoát chroot (đã biết trong giới bảo mật). Vì vậy mục tiêu của chroot là **hạn chế tai nạn và leo thang dễ dàng**, **không** phải "ngăn tuyệt đối một kẻ có shell đã chiếm quyền." Chính vì thế ta kết hợp: chroot **và** không cấp shell (`/usr/sbin/nologin`) **và** thư mục upload **không execute** (`mount -o noexec`).
+
+**Khi nào nên dùng.** Luôn chroot người dùng SFTP/FTP không đáng tin. Với quản trị viên có key + đã kiểm soát, có thể không cần. Chroot là một *lớp*, không phải *hàng rào cuối*.
+
+Nguồn:
+- OpenSSH sshd_config (ChrootDirectory): https://man.openbsd.org/sshd_config.5
+- vsftpd.conf(5): https://linux.die.net/man/5/vsftpd.conf
+
+### 6.7 Đặc quyền tối thiểu (least privilege) cho file và dịch vụ
+
+**Nguyên lý.** Mỗi tiến trình và mỗi file chỉ nên có **vừa đủ** quyền để hoàn thành nhiệm vụ, không hơn. Dịch vụ chạy bằng user đặc quyền (`root`) là thảm họa khi bị chiếm: kẻ tấn công có ngay root.
+
+- **Dịch vụ chạy như user "gần như nobody"**: vsftpd, postfix, dovecot đều fork tiến trình worker dưới user không đặc quyền (`nobody`/`postfix`/`dovecot`), chỉ tiến trình master giữ quyền đọc key/cổng.
+- **Quyền file nghiêm ngặt** cho key và passdb:
+
+```text
+600  /etc/ssh/ssh_host_ed25519_key       # private key: chỉ root đọc
+600  /etc/postfix/sasl/passwd            # mật khẩu: không cho cả group đọc
+600  /etc/ssl/private/mail.lab.local.key # key TLS riêng tư
+400  /etc/dovecot/private/dovecot.pem    # passdb/cert tư
+# KHÔNG BAO GIỜ world-writable; kiểm tra:
+find /etc -xdev -perm -o+w -type f       # quét file world-writable đáng ngờ
+```
+
+- **umask** của service account đặt `077`/`027` để file tạo ra mặc định không lộ cho group/other.
+- **Group theo vai trò**: tạo `sftpusers` (được chroot-only), `vftp` (user FTP ảo) thay vì cho mọi người vào nhóm có shell.
+
+**Mandatory Access Control (MAC).** Linux DAC (quyền rwx cổ điển) có thể bị qua khi tiến trình chạy root. Lớp trên cùng là **AppArmor** (mặc định bật trên Ubuntu) hoặc **SELinux** (mặc định trên RHEL). **Đừng tưởng daemon nào cũng đã được confines**: kiểm chứng bằng `aa-status` / `aa-unconfined` và xem `/etc/apparmor.d/`. Trên Ubuntu server, bộ profile đi kèm gói `apparmor` gốc phủ nhiều binary phổ biến (công cụ container, trình duyệt desktop, một số daemon mạng) nhưng OpenSSH và vsftpd thường chạy **`unconfined`** theo mặc định — muốn có profile cho chúng phải tự tạo (`aa-genprof`, chế độ `complain` rồi `enforce`) hoặc lấy từ các bộ profile cộng đồng đóng gói qua `apparmor-profiles`. Bài học thực tế từ Debian/Ubuntu: các profile sshd mới được đưa vào từng gây hỏng dịch vụ (vd. Debian bug #1078441 — profile sshd chặn kết nối đến), nên mọi profile viết thêm đều phải kiểm chứng trong lab trước khi `enforce`. **Nhược điểm chung**: profile sai chặn tính năng hợp lệ → luôn đi đường `complain` → `enforce`.
+
+**Ưu điểm.** Chặn **leo thang đặc quyền (privilege escalation)**: chiếm được worker không đặc quyền ≠ chiếm root. Quyền file 600 ngăn user thường đọc key TLS. MAC giới hạn blast radius.
+
+**Nhược điểm/chi phí.** Cấu hình quyền quá chặt gây hỏng dịch vụ (không đọc được cert) → cần thử nghiệm. AppArmor/SELinux có đường học steep, dễ bị "tắt cho xong" — sai lầm phổ biến.
+
+**Khi nào nên dùng.** Luôn. Đặt quyền file private key/passdb = 600 ngay lần đầu tạo chúng; bật AppArmor có sẵn của Ubuntu và chỉ chuyển sang SELinux khi có yêu cầu tương thích RHEL.
+
+Nguồn:
+- Red Hat — Managing confined services (SELinux FTP): https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/7/html/selinux_users_and_administrators_guide/chap-managing_confined_services-file_transfer_protocol
+- Ubuntu — AppArmor: https://documentation.ubuntu.com/server/how-to/security/apparmor.html
+
+### 6.8 Kiểm soát mạng: UFW và fail2ban
+
+**Nguyên lý — default deny.** Tường lửa cấu hình theo hướng **chặn tất cả, mở từng cổng theo nhu cầu** (allowlist), không phải "mở hết rồi chặn cái nguy hiểm".
+
+```bash
+sudo ufw default deny incoming     # mặc định CHẶN mọi kết nối vào
+sudo ufw default allow outgoing
+sudo ufw allow 22/tcp   comment 'SSH/SFTP'
+sudo ufw allow 993/tcp  comment 'IMAPS'
+sudo ufw allow 995/tcp  comment 'POP3S'
+sudo ufw allow 587/tcp  comment 'SMTP submission'
+sudo ufw allow from 10.0.0.0/24 to any port 25 proto tcp  # whitelist IP quản trị/subnet lab
+sudo ufw limit 22/tcp              # rate-limit SSH: chặn brute-force ngay ở tầng tường lửa
+sudo ufw enable
+```
+
+Lưu ý: nếu mở cổng **25 ra toàn thế giới** thì ai cũng quét được — chỉ 25 cho MTA-to-MTA (xem 6.9); còn cổng quản trị (SSH) nên **whitelist theo IP/subnet lab**.
+
+**Nguyên lý — fail2ban.** fail2ban đọc log, đếm failure theo IP nguồn, và **tự động chặn** IP vượt ngưỡng (qua iptables/nftables). Mỗi dịch vụ có một **jail**:
+
+```ini
+# /etc/fail2ban/jail.local
+[DEFAULT]
+bantime  = 1h          # thời gian chặn gốc
+findtime = 10m
+maxretry = 5
+bantime.increment = true    # bantime TĂNG DẦN cho IP tái phạm
+bantime.factor    = 2
+ignoreip = 127.0.0.1/8 10.0.0.0/24    # loại trừ loopback + subnet lab khỏi bị khóa
+
+[sshd]
+enabled = true
+[vsftpd]
+enabled = true
+[postfix]
+enabled = true
+[dovecot]
+enabled = true
+```
+
+Cần bật `backend = systemd` hoặc trỏ `logpath` đúng với log thật của Ubuntu (`/var/log/auth.log`, `/var/log/mail.log`), và **khởi động jail tương ứng có filter** trong `/etc/fail2ban/filter.d/`.
+
+**Nguyên lý — rate limiting trong chính dịch vụ.** Ngoài tường lửa, mỗi daemon tự giới hạn để chống DoS và làm chậm brute-force:
+
+| Dịch vụ | Tham số | Tác dụng |
+|---|---|---|
+| sshd | `MaxAuthTries 4` (mặc định 6) | chặn số lần thử mật khẩu mỗi kết nối |
+| sshd | `MaxStartups 10:30:60` (mặc định 10:30:100) | giới hạn kết nối đồng thời chưa xác thực |
+| Postfix | `smtpd_client_connection_rate_limit`, `smtpd_client_connection_count_limit` | giới hạn kết nối/giây và đồng thời/IP |
+| Postfix | `anvil_status_update_time` | anvil là daemon đếm tỉ lệ kết nối/nhận thư |
+| vsftpd | `max_clients`, `max_per_ip` | tổng client và client mỗi IP |
+| vsftpd | `local_max_rate`, `idle_session_timeout` | giới hạn băng thông + timeout phiên rảnh |
+| Dovecot | `login_trusted_networks` | phân biệt mạng tin cậy để áp rate limit |
+
+**Ưu điểm.** Chặn quét cổng và brute-force trước khi chúng chạm vào xác thực; giảm tải CPU cho dịch vụ; giới hạn thiệt hại DoS. `bantime.increment` khiến kẻ tấn công tái phạm bị khóa ngày càng lâu.
+
+**Nhược điểm/chi phí.** **Khóa nhầm (false positive)** — quên `ignoreip` subnet lab thì chính nhóm tự khóa mình khỏi SSH. fail2ban phụ thuộc định dạng log đúng; đổi version có thể hỏng filter. Whitelist tĩnh không giúp gì nếu IP admin thay đổi (DSL). Rate limit quá chặt gây khó cho người dùng bình thường phía sau NAT công cộng.
+
+**Khi nào nên dùng.** Luôn bật `default deny incoming` + fail2ban trên mọi cổng SSH/mail. Trong lab nhớ `ignoreip` dải nội bộ và máy test để không tự khóa.
+
+Nguồn:
+- fail2ban README (jails, bantime.increment): https://github.com/fail2ban/fail2ban
+- OpenSSH sshd_config (MaxAuthTries/MaxStartups): https://man.openbsd.org/sshd_config.5
+- Postfix postconf(5): https://www.postfix.org/postconf.5.html
+- vsftpd.conf(5): https://linux.die.net/man/5/vsftpd.conf
+
+### 6.9 Không trở thành open relay (Postfix)
+
+**Nguyên lý.** **Open relay** là MTA cho phép ai cũng gửi thư **đến tên miền khác** — biến server thành bàn phát spam, dẫn đến bị blackhole (Spamhaus) và reputations sập. Chốt chặn là `smtpd_relay_restrictions` quyết định *ai được relay tới đâu*:
+
+```ini
+# /etc/postfix/main.cf
+mynetworks = 127.0.0.0/8 [::1]/128 10.0.0.0/24   # chỉ loopback + subnet lab (liệt kê tĩnh dạng CIDR, phân tách bằng khoảng trắng)
+smtpd_relay_restrictions =
+    permit_mynetworks,             # cho relay từ dải tin cậy
+    permit_sasl_authenticated,     # cho relay sau khi người dùng xác thực (submission)
+    reject_unauth_destination      # CHẶN mọi relay khác — dòng "chốt" chống open relay
+```
+
+Thứ tự quan trọng: `reject_unauth_destination` **phải có mặt**; nếu chỉ dựa vào `mynetworks = 0.0.0.0/0` (sai lầm kinh điển) thì ai cũng relay được.
+
+**Tự kiểm thử trong lab** (mạng riêng do nhóm sở hữu — không dùng dịch vụ quét công cộng, không gửi spam). Từ máy client lab, dùng `telnet`/`nc` tới cổng 25 rồi thử relay tới một địa chỉ **bên ngoài không thuộc quyền sở hữu** và xác nhận server **từ chối**:
+
+```text
+mail> nc mail.lab.local 25
+220 mail.lab.local ESMTP Postfix
+EHLO tester.lab.local
+250-mail.lab.local
+RCPT TO:<someone@example.org>          <- thử relay ra ngoài, chưa auth
+554 5.7.1 <someone@example.org>: Relay access denied   <- ĐÚNG: bị chặn
+QUIT
+```
+
+Kết quả kỳ vọng: khi chưa `AUTH` và không từ `mynetworks`, mọi `RCPT TO:` đi tới miền khác bị **`554 Relay access denied`**. Nếu server trả `250 OK` ở bước này → **bạn đã mở relay** → sửa `smtpd_relay_restrictions`/`mynetworks` rồi reload (`postfix reload`) và test lại.
+
+**Ưu điểm.** Giữ reputation IP/domain, tránh bị liệt blacklist, tránh bị lợi dụng phát tán spam (rủi ro pháp lý).
+
+**Nhược điểm/chi phí.** Siết relay có thể chặn nhầm thiết bị (máy scan, máy in gửi mail thông báo) nằm ngoài `mynetworks` — giải pháp đúng là cho chúng xác thực qua submission, **không** phải nới `mynetworks`.
+
+**Khi nào nên dùng.** Bắt buộc trước khi máy chủ từng được kết nối với mạng ngoài. Ngay cả lab "kín" cũng nên test vì sinh viên thường vô tình cấu hình `mynetworks = 0.0.0.0/0`.
+
+Nguồn:
+- Postfix — SMTP relay and access control (relaying restrictions): https://www.postfix.org/SMTPD_ACCESS_README.html
+- Postfix postconf(5) — smtpd_relay_restrictions: https://www.postfix.org/postconf.5.html
+
+### 6.10 SMTP AUTH và submission bắt buộc (cổng 587)
+
+**Nguyên lý.** Tách hai vai trò trên hai cổng:
+
+- **Cổng 25** dành cho **MTA-to-MTA** (thư đến từ các server khác). Không bắt buộc auth ở đây (server ngoài không có tài khoản của bạn).
+- **Cổng 587 (submission)** dành cho **người dùng cuối** (MUA → MSA), **bắt buộc SMTP AUTH + TLS** (đặt `smtpd_tls_security_level=encrypt`, `smtpd_sasl_auth_enable=yes` trong `master.cf`).
+
+```ini
+# /etc/postfix/master.cf — entry submission
+submission inet n - y - - smtpd
+  -o smtpd_tls_security_level=encrypt
+  -o smtpd_sasl_auth_enable=yes
+  -o smtpd_relay_restrictions=permit_sasl_authenticated,reject
+  -o milter_macro_daemon_name=ORIGINATING
+```
+
+Sau khi xác thực, Postfix **gán thư vào đúng user** → phân quyền và giới hạn theo từng người (ai gửi bao nhiêu, gửi đi đâu), dễ revocation khi một tài khoản bị lộ.
+
+**Ưu điểm.** Chống giả mạo người gửi trong nội bộ (phải login), cho phép **throttling/phân quyền theo user**, và cổng 587 cho client dễ phân biệt với 25. Kết hợp SASL qua Dovecot (`smtpd_sasl_type=dovecot`) dùng chung một nguồn credentials cho gửi và nhận.
+
+**Nhược điểm/chi phí.** Bắt buộc client cấu hình đúng (server gửi khác server nhận, khác cổng, khác TLS) — người dùng mới hay sai. Cần **password/app-password** cho mỗi thiết bị. Nếu để mở 25 cho client và không bắt auth, vẫn lộ đường vòng.
+
+**Khi nào nên dùng.** Luôn dùng 587 cho người dùng cuối; giữ 25 chỉ để nhận thư từ thế giới. Trong lab, cấu hình Thunderbird trỏ **outgoing = 587 + STARTTLS/TLS + username/password**.
+
+Nguồn:
+- Postfix submission/RELAY: https://www.postfix.org/postconf.5.html
+- Dovecot SASL cho Postfix: https://doc.dovecot.org/
+
+### 6.11 SPF, DKIM, DMARC (bộ ba xác thực email)
+
+Ba cơ chế này **giải quyết ba vấn đề khác nhau và bổ trợ nhau**. Điểm mấu chốt dễ nhầm: chúng chống **giả mạo tên miền gửi**, không chống mọi hình thức lừa đảo.
+
+**SPF — RFC 7208 (Sender Policy Framework).** Một DNS TXT record khai báo **những IP nào được phép gửi thư** cho tên miền. Server nhận **kiểm tra trên envelope MAIL FROM** (return-path / địa chỉ bounce), *không* phải header "From:" hiển thị.
+
+```dns
+lab.local.  IN  TXT  "v=spf1 ip4:10.0.0.10 -all"
+# v=spf1: phiên bản; ip4:...: IP được phép; -all: mọi nguồn khác = hard fail
+```
+
+- **Giới hạn SPF**: không chống được việc giả **header "From:"** hiển thị (kẻ lừa đảo dùng SPF pass cho tên miền *khác* rồi đặt From: hiển thị thành miền bạn — "header spoofing"). **Forwarding làm hỏng SPF** (thư relay qua server bên thứ ba → IP không còn khớp → thường chỉ nên đặt `~all` = *soft fail* khi chưa kiểm soát được forwarder). Giới hạn **10 lần tra cứu DNS** mỗi record (RFC 7208 §4.6.4) — vượt quá trả `permerror`; các `include:` lồng nhau dễ chạm trần.
+
+**DKIM — RFC 6376 (DomainKeys Identified Mail).** MTA **ký số** vào một tập header + body bằng private key; public key đặt trong DNS tại `<selector>._domainkey.<domain>`. Server nhận verify chữ ký → chứng minh (1) nội dung **không bị sửa** giữa đường, (2) thư được gửi bởi bên **sở hữu private key** của tên miền.
+
+```dns
+default._domainkey.lab.local.  IN  TXT
+  "v=DKIM1; k=rsa; p=MIGfMA0GCSqG... (public key)"
+```
+
+- **Giới hạn DKIM**: chữ ký gắn vào một **selector** và **phải xoay vòng key** (rotation); khi đổi key phải cập nhật DNS. Forwarding sửa body (thêm footer) làm **mất hiệu lực chữ ký**. DKIM tự nó không nói *domain đó có đáng tin không* — chỉ nói đúng là do domain ký.
+
+**DMARC — RFC 7489 (Domain-based Message Authentication, Reporting and Conformance).** Lưu ý cập nhật: tháng 5/2026, RFC 7489 đã được bộ ba **RFC 9989** (DMARC core), **RFC 9990** (aggregate reporting) và **RFC 9991** (failure reporting) thay thế — nội dung cốt lõi không đổi, chỉ tách tài liệu và sửa lỗi (errata); trong lab vẫn quen gọi "DMARC RFC 7489". Đặt ở `_dmarc.lab.local` TXT, khai **chính sách xử lý** khi SPF/DKIM fail và **yêu cầu alignment**:
+
+```dns
+_dmarc.lab.local.  IN  TXT
+  "v=DMARC1; p=reject; sp=none; rua=mailto:dmarc-reports@lab.local; pct=100; adkim=s; asf=s"
+# p= : none → quarantine → reject (mức cưỡng chế tăng dần theo thời gian)
+# rua: nhận báo cáo aggregate; ruf: báo cáo forensic
+# adkim=s / asf=s : yêu cầu STRICT alignment cho DKIM/SPF
+```
+
+- **Alignment** là trái tim của DMARC: yêu cầu **header "From:" khớp miền** với miền đã vượt qua SPF *hoặc* DKIM (organizational domain). Nhờ đó nó vá đúng chỗ hổng "SPF/DKIM pass nhưng From: là miền giả" mà hai cơ chế trước bỏ lọt.
+- **Reporting**: `rua` gửi báo cáo XML định kỳ (ai đang gửi dưới tên miền, tỉ lệ pass/fail) → cho phép chuyển từ `p=none` (chỉ quan sát) lên `p=reject` một cách an toàn.
+
+**Bộ ba hỗ trợ nhau (đây là ý chính cần nhấn mạnh).**
+
+| Cơ chế | Chống | Bằng chứng cung cấp |
+|---|---|---|
+| SPF | Giả mạo **envelope MAIL FROM** | "IP này được miền ủy quyền gửi" |
+| DKIM | **Sửa nội dung** trên đường + **chứng minh quyền sở hữu** miền (proof-of-dominance) qua private key | "Thư do miền ký, không bị biến đổi" |
+| DMARC | **Liên kết** SPF + DKIM với header From: (alignment), đặt **chính sách** và **báo cáo** | "Không đạt thì xử lý thế nào + cho ai biết" |
+
+Không có DMARC, SPF/DKIM pass trên một miền *không liên quan* vẫn không bảo vệ được tên miền thương hiệu của bạn; DMARC chính là thứ "khâu" ba mảnh lại và cho bạn kênh giám sát.
+
+**Giới hạn chung (nói thẳng).** Bộ ba **không** chống được phishing dùng **display name** ("Ngân Hàng ABC <attacker@xyz.com>"), **look-alike domain** (`lab-1ocal.local` thay `lab.local`), và **không thay thế sự cảnh giác của người dùng** — nó chỉ làm kẻ tấn công *khó giả mạo chính tên miền của bạn*, không chặn mọi email xấu.
+
+**BIMI — nâng cao.** Brand Indicators for Message Identification cho phép hiển thị **logo thương hiệu** trong client của người nhận, nhưng chỉ khi DMARC đạt mức `p=quarantine`/`p=reject` (và thường cần **Verified Mark Certificate**). Trạng thái chuẩn cần nói chính xác: tính đến 8/2026, BIMI **vẫn là Internet-Draft** (`draft-brand-indicators-for-message-identification`, chưa phải RFC chuẩn hóa). *Lưu ý tránh nhầm*: số "RFC 9627" đôi khi bị gán sai cho BIMI — RFC 9627 thực chất là một tài liệu RTCP/AVT không liên quan; **không** dẫn RFC 9627 cho BIMI.
+
+Nguồn:
+- RFC 7208 (SPF): https://www.rfc-editor.org/info/rfc7208
+- RFC 6376 (DKIM): https://www.rfc-editor.org/info/rfc6376
+- RFC 7489 (DMARC — đã được thay thế từ 5/2026): https://www.rfc-editor.org/info/rfc7489
+- RFC 9989 / 9990 / 9991 (DMARC bản thay thế, 2026): https://www.rfc-editor.org/info/rfc9989
+- BIMI Internet-Draft (không phải RFC): https://datatracker.ietf.org/doc/draft-brand-indicators-for-message-identification/
+
+### 6.12 Vận hành: cập nhật, backup, log và phản ứng sự cố
+
+**Nguyên lý — vá lỗi tự động và kế hoạch EOL.** Lỗ hổng trong vsftpd/openssh/postfix/dovecot được công bố liên tục; máy không cập nhật = cửa mở. Bật `unattended-upgrades` cho security updates:
+
+```bash
+sudo apt install unattended-upgrades
+sudo dpkg-reconfigure -plow unattended-upgrades
+# /etc/apt/apt.conf.d/50unattended-upgrades: chỉ auto-upgrade từ origin "UbuntuESM"/security
+```
+
+Kèm **kế hoạch EOL**: Ubuntu 24.04 LTS và bản mới nhất 26.04 LTS (23/4/2026, hỗ trợ tiêu chuẩn đến ~4/2031). Lên lịch **nâng phiên bản LTS** trước khi bản đang chạy hết hạn, và đăng ký **ESM/Pro** cho các gói còn CVE sau 5 năm. Ghi rõ trong runbook: dịch vụ nào đang chạy trên bản sắp hết hạn.
+
+**Nguyên lý — backup cấu hình.** Một kho **git nội bộ** chứa cấu hình đã **ẩn secret**:
+
+```bash
+sudo git init /etc/ops-config && cd /etc/ops-config
+git add main.cf master.cf dovecot/ sshd_config fail2ban/ vsftpd.conf
+echo "/etc/ssl/private" > .git/info/exclude   # KHÔNG commit private key / mật khẩu
+git commit -m "baseline hardening"
+```
+
+Lưu ý **không bao giờ** commit private key, mật khẩu passdb, hay cert tư vào repo; chỉ lưu cấu hình. Kèm **offline copy** để chống ransomware mã hóa cả backup.
+
+**Nguyên lý — log và retention.** Gia cố chỉ có nghĩa nếu phát hiện được vi phạm. Cấu hình **log rotation + retention** (rsyslog/`logrotate`, journald `SystemMaxUse=`), gom log về một máy log **tách rời** (để kẻ xâm nhập không xóa dấu vết trên chính máy bị hại). Các **từ khóa log thật** cần soi hằng tuần:
+
+```text
+/var/log/auth.log:  "Failed password for", "Invalid user", "authentication failure"
+/var/log/mail.log:  "SASL LOGIN authentication failed", "Relay access denied", "Disconnected: Too many authentication failures"
+fail2ban:           "Ban 203.0.113.9" / "Unban 203.0.113.9"   (TEST-NET, dải minh họa RFC 5737)
+```
+
+**Incident response plan 6 bước — chu trình vòng đời (lifecycle) kinh điển của NIST SP 800-61 (Rev. 3 ban hành 4/2025, thay Rev. 2 năm 2012; Rev. 3 ánh xạ theo CSF 2.0 và gộp thành 4 giai đoạn: Preparation → Detection & Analysis → Containment, Eradication & Recovery → Post-Incident Activity; 6 bước dưới đây là cách trải các giai đoạn đó ra cho dễ tick trong lab):**
+
+1. **Chuẩn bị (Preparation):** đã có backup, log, tài liệu này, người phụ trách.
+2. **Phát hiện & phân tích (Detection & Analysis):** thấy log bất thường/quy trình fail2ban khóa IP lạ, đánh giá mức độ.
+3. **Cô lập (Containment):** cô lập — chặn IP bằng UFW, đổi credential nghi lộ, tạm dừng dịch vụ bị lợi dụng (không rút điện, giữ hiện trường).
+4. **Diệt trừ (Eradication):** tìm và xóa root cause — patched package, gỡ backdoor/malware, siết lại cấu hình hở.
+5. **Phục hồi (Recovery):** khôi phục dịch vụ từ bản sạch, theo dõi log sau khi mở lại.
+6. **Bài học (Lessons Learned):** cập nhật tài liệu/checklist, điều chỉnh chính sách để không lặp lại.
+
+**Hardening checklist trước khi chạy production.** In ra, tick từng mục:
+
+- [ ] FTP plaintext đã tắt (6.1); chỉ còn SFTP/FTPS.
+- [ ] TLS bắt buộc cho 587/465/993/995; đã **đóng 143/110** ra ngoài (6.2).
+- [ ] Chứng chỉ TLS còn hạn + quy trình gia hạn (6.2).
+- [ ] `PasswordAuthentication no` cho SSH; đăng nhập bằng key + passphrase (6.3).
+- [ ] Mật khẩu hệ thống đủ entropy, không reuse; MFA ở SSH nếu dùng (6.4).
+- [ ] `anonymous_enable=NO`; gỡ/dừng mọi dịch vụ không cần (6.5).
+- [ ] SFTP user bị chroot (`ChrootDirectory` root:root 755 + `ForceCommand internal-sftp`); thư mục upload `noexec` (6.6).
+- [ ] Private key/passdb = 600; không có file world-writable; AppArmor enforce (6.7).
+- [ ] `ufw default deny incoming`; jail fail2ban bật cho sshd/vsftpd/postfix/dovecot; `ignoreip` lab (6.8).
+- [ ] `smtpd_relay_restrictions` có `reject_unauth_destination`; **test relay nội bộ = 554** (6.9).
+- [ ] Client dùng 587 + AUTH + TLS (6.10).
+- [ ] SPF/DKIM/DMARC công bố; DMARC ít nhất `p=none` + `rua` trước khi lên `p=reject` (6.11).
+- [ ] `unattended-upgrades` bật + kế hoạch EOL; backup config offline; log retention + central log; IR plan & người phụ trách đã ghi (6.12).
+
+Nguồn:
+- NIST SP 800-61 Rev. 3 (Incident Response Recommendations): https://csrc.nist.gov/pubs/sp/800/61/r3/final
+- Ubuntu — Automatic updates: https://documentation.ubuntu.com/server/how-to/software/process-updates.html
+- Ubuntu release cycle (LTS/ESM): https://ubuntu.com/about/release-cycle
+- Ubuntu Server docs (mail/ssh/security): https://documentation.ubuntu.com/server/
+
+---
+
+**Tóm lại chương 6.** Phòng ngừa hiệu quả cho bộ dịch vụ FTP/SFTP/SMTP/POP3/IMAP là một chuỗi hành động *có trật tự*: trước tiên **loại bỏ plaintext** (SFTP/FTPS + TLS bắt buộc), **thay mật khẩu bằng key và siết xác thực**, **thu nhỏ bề mặt tấn công** (tắt anonymous, chroot, least privilege, default-deny + fail2ban), **không để lộ dịch vụ** (không open relay, submission bắt buộc), **bảo vệ danh tính tên miền** (SPF/DKIM/DMARC), và cuối cùng **vận hành kỷ luật** (vá lỗi, backup, log, kế hoạch ứng phó sự cố). Biện pháp nào cũng có chi phí và giới hạn — hiểu *vì sao dễ bị bypass* (chroot không phải sandbox, SPF không chặn header From, MFA không khả thi trên IMAP) mới chọn đúng lớp phòng thủ phù hợp cho lab của đồ án.
+
+---
+
+## 7. Thiết kế phòng lab an toàn và ba kịch bản demo
+
+Chương này phục vụ hai mục đích. Thứ nhất, thiết kế một phòng lab mạng nội bộ cô lập (isolated lab network) đủ thật để minh họa toàn bộ các nguy cơ đã phân tích ở chương 5–6, nhưng đủ kín để không gây hại cho bất kỳ hệ thống nào bên ngoài. Thứ hai, trình bày ba kịch bản demo mẫu — FTP plaintext so với SFTP, brute-force có kiểm soát được fail2ban phát hiện, và open relay SMTP rồi khắc phục — theo một khuôn khổ chung: mục tiêu, luồng hoạt động, chuẩn bị, các bước thực hiện, kết quả mong đợi, bằng chứng cần thu thập, log cần quan sát, biện pháp phòng thủ, cách kiểm thử lại sau phòng thủ, và rủi ro/an toàn riêng của từng kịch bản.
+
+> **Nguyên tắc xuyên suốt:** mọi hành vi "tấn công" trong chương này chỉ nhắm vào các máy do nhóm tự dựng trong dải mạng lab, được giảng viên phê duyệt. Đây là tài liệu giáo dục và phòng thủ — không phải hướng dẫn tấn công hệ thống thật.
+
+### 7.1 Thiết kế phòng lab an toàn
+
+#### 7.1.1 Vì sao phải dùng mạng riêng ảo cô lập (Host-only / Internal network)
+
+Ba lý do cốt lõi khiến lab bắt buộc chạy trên VirtualBox *Host-only Adapter* hoặc *Internal Network* (VMware: *VMnet host-only* / *LAN Segment*), tuyệt đối không dùng Bridged Adapter:
+
+1. **Cô lập spam và thư thật.** Kịch bản C mô phỏng open relay (máy chủ chuyển tiếp thư cho bên thứ ba). Nếu lab bridged (cầu nối) ra Internet, một cú gửi nhầm có thể khiến IP của trường bị các danh sách chặn (Blocklist) như Spamhaus ghi nhận — hậu quả thật, sửa rất lâu.
+2. **Tránh bị quét ngược.** Máy chạy dịch vụ FTP/SMTP "mở toang" đặt trên mạng thật sẽ bị bot Internet dò thấy trong vài phút; password weak sẽ bị đoán thật, và email notification từ dịch vụ sẽ lộ ra ngoài.
+3. **Không làm thật.** Brute-force vào máy chủ của người khác là hành vi vi phạm pháp luật (tại Việt Nam: xâm nhập trái phép vào mạng máy tính, mạng viễn thông hoặc phương tiện điện tử của người khác là tội phạm theo Điều 289 Bộ luật Hình sự 2015; hành vi tấn công hoặc vô hiệu hóa trái phép các biện pháp bảo vệ an ninh mạng còn bị nghiêm cấm theo Điều 8 Luật An ninh mạng 2018). Trong lab cô lập, mục tiêu do nhóm sở hữu, hành vi chỉ mang tính giáo dục.
+
+Mạng Host-only/Internal không cấp quyền ra Internet cho các VM; muốn cập nhật gói (apt) thì tạm bật thêm card NAT cho *máy server*, hoặc dùng cache/mirror cục bộ — làm xong tắt trước khi chạy kịch bản.
+
+#### 7.1.2 Sơ đồ topology
+
+```
+                          ✗ Internet (các VM KHÔNG có đường ra)
+ ═══════════════════════════════════════════════════════════════════════
+        VirtualBox Host-only / Internal Network  (VMnet riêng)
+        Dải tĩnh: 192.168.100.0/24 — không DHCP, tự cấu hình IP
+ ┌────────────────────┐    ┌──────────────────────────┐    ┌────────────────────┐
+ │ lab-attacker-XX    │    │ lab-mail-XX              │    │ lab-user-XX        │
+ │ .100.20            │◄──►│ 192.168.100.10           │◄──►│ 192.168.100.30     │
+ │ Kali Linux hoặc    │    │ Ubuntu Server 24.04 LTS  │    │ Ubuntu/Windows     │
+ │ Ubuntu Desktop     │    │ vsftpd · sshd · postfix  │    │ Desktop            │
+ │ • nmap (quét port  │    │ dovecot · ufw · fail2ban │    │ • FileZilla (FTP/  │
+ │   lab nội bộ)      │    │ (CA nội bộ + cert TLS)   │    │   FTPS/SFTP)       │
+ │ • Wireshark (bắt   │    │                          │    │ • Thunderbird      │
+ │   gói tin)         │    │                          │    │   (IMAP/SMTP test) │
+ │ • swaks · ftp ·    │    │                          │    │ • ssh/scp          │
+ │   sshpass          │    │                          │    │                    │
+ └────────────────────┘    └──────────────────────────┘    └────────────────────┘
+        │                          │
+        └──── mọi lưu lượng demo ──┘   Host (PC thật): chỉ chạy hypervisor,
+              đi trong /24             KHÔNG tham gia tấn công
+```
+
+Ba máy, ba vai trò rõ ràng: **server dịch vụ** (nạn nhân/quan sát), **máy kiểm thử** (attacker có kiểm soát + công cụ phân tích), **máy người dùng** (client hợp lệ, dùng để chứng minh phòng thủ không phá hỏng người dùng thật). Tên máy theo quy ước `lab-<vai trò>-XX` với **XX = mã nhóm** (ví dụ nhóm 07 → `lab-mail-07`), tránh trùng tên giữa các nhóm và dễ truy vết snapshot.
+
+#### 7.1.3 Bảng IP — hostname — dịch vụ — cổng mở dự kiến
+
+| Machine | Hostname | IP tĩnh | Vai trò | Dịch vụ chính | Cổng mở dự kiến |
+|---|---|---|---|---|---|
+| Ubuntu Server 24.04 LTS | `lab-mail-XX` | 192.168.100.10 | Mail/FTP server | vsftpd, sshd (OpenSSH), Postfix, Dovecot, ufw, fail2ban | 21 (FTP), 22 (SSH/SFTP), 25 (SMTP), 110 (POP3, tắt nếu không dùng), 143 (IMAP, tắt nếu không dùng), 587 (submission), 993 (IMAPS), 995 (POP3S); 989/990 nếu bật FTPS implicit |
+| Kali hoặc Ubuntu | `lab-attacker-XX` | 192.168.100.20 | Máy kiểm thử | nmap, Wireshark, swaks, ftp, ssh, sshpass | Không cần mở (client thuần) |
+| Ubuntu/Windows | `lab-user-XX` | 192.168.100.30 | Người dùng cuối | FileZilla, Thunderbird, ssh/scp | Không cần mở |
+
+Các cổng trên khớp đăng ký IANA/RFC: 20/21 là điều khiển/dữ liệu FTP (STD 9, RFC 959); 22 là SSH, trên đó SFTP chạy như một subsystem (SFTP **không** có RFC chuẩn hóa riêng — tính đến nay vẫn chỉ ở dạng các bản nháp IETF `draft-ietf-secsh-filexfer-*`, còn SSH thì dựa trên RFC 4253); 25 là SMTP (STD 10, RFC 5321); 587 là *message submission* theo RFC 6409; 465 là SMTPS implicit-TLS được chuẩn hóa lại trong RFC 8314; 21 (explicit, `AUTH TLS` — khuyến nghị chính thức) và cặp 989/990 (implicit — quy ước legacy do RFC 4217 coi là cần tránh) cho FTPS; 993/995 là IMAPS/POP3S.
+
+#### 7.1.4 Quy tắc an toàn bắt buộc (áp dụng cho cả 3 kịch bản)
+
+1. **Chỉ nhắm vào IP trong dải 192.168.100.0/24** của lab mình. Cấm port-scan hay thử credential ra bất kỳ IP nào khác, kể cả Google/YouTube — mọi scan Internet đều có thể để lại log ở phía bị scan.
+2. **Không gửi thư ra Internet.** Trong lab, máy đích chỉ là `*.lab.local`/`*.edu.lab` hoặc các domain được dành riêng cho thử nghiệm (`.test` — reserved theo RFC 6761).
+3. **Không dùng credential thật.** Mật khẩu demo dạng `Lab@...123` do nhóm tự đặt, không trùng mật khẩu cá nhân/dịch vụ nào.
+4. **Chỉ tấn công máy do nhóm mình sở hữu và được giảng viên phê duyệt.** Trong lớp đông nhóm, kiểm tra kỹ bảng IP trước khi bấm Enter.
+5. **Snapshot trước mỗi kịch bản** (VirtualBox → Machine → Take Snapshot): `before-A`, `before-B`, `before-C`. Làm hỏng cấu hình thì revert trong 30 giây, và báo cáo có mốc thời gian "trước/sau" rõ ràng.
+6. **Thu bằng chứng có ghi nhật ký:** mỗi nhóm giữ một file `chong-nhat-ky.md` ghi lệnh đã chạy + thời gian, để khi log server xuất hiện "tấn công" thì biết ngay đó là bài của nhóm nào.
+
+#### 7.1.5 Chuẩn bị chung
+
+**a) Cài đặt (làm trên `lab-mail-XX`, 64-bit):**
+
+```bash
+sudo apt update
+# Bộ dịch vụ của đồ án: FTP, SSH, SMTP, IMAP/POP3 + tường lửa + chống brute-force
+sudo apt install -y vsftpd postfix dovecot-imapd dovecot-pop3d \
+                    ufw fail2ban
+# Postfix khi cài sẽ hỏi "General type of mail configuration" → chọn "Internet Site"
+# System mail name: đặt lab.local (xem mục b)
+```
+
+**b) Domain giả trong lab.** Dùng `lab.local` hoặc `edu.lab`. Đây là các tên *không tồn tại trên DNS công khai*, nên kể cả khi có thư "rò" ra cũng không tới được ai thật. Tuyệt đối không dùng domain thật (khamfu.vn, gmail.com...) làm `mydestination` vì máy có thể thử chuyển thư thật. Lưu ý thêm: khi cần một địa chỉ "người nhận ngoài Internet" để test relay, dùng đuôi **`.test`** (ví dụ `external@nowhere.test`) — TLD này được IETF dành riêng cho thử nghiệm (RFC 6761), bảo đảm không bao giờ phân giải ra máy thật.
+
+**c) CA nội bộ tự dựng (self-signed internal CA) cho FTPS/SMTPS/IMAPS.** Vì `lab.local` không có chứng chỉ (certificate) công khai hợp lệ (không thể xin Let's Encrypt), cả nhóm tự làm một CA riêng — đây cũng là bài học về mô hình Trust-on-first-use và vì sao client sẽ cảnh báo "untrusted certificate":
+
+```bash
+# 1) Tạo CA tự ký (self-signed) — chạy trên lab-mail, thư mục /etc/ssl/lab
+sudo mkdir -p /etc/ssl/lab && cd /etc/ssl/lab
+sudo openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+     -keyout lab-ca.key -out lab-ca.crt \
+     -subj "/CN=Lab Internal CA $USER"        # CN = tên CA hiển thị khi import
+
+# 2) Tạo khóa + CSR cho server, cấp cert có SAN (Subject Alternative Name)
+sudo openssl req -newkey rsa:2048 -nodes \
+     -keyout lab-mail.key -out lab-mail.csr -subj "/CN=lab-mail.lab.local"
+printf "subjectAltName=DNS:lab-mail.lab.local,IP:192.168.100.10\n" > san.cnf
+sudo openssl x509 -req -in lab-mail.csr -CA lab-ca.crt -CAkey lab-ca.key \
+     -CAcreateserial -days 365 -extfile san.cnf -out lab-mail.crt
+# → lab-mail.crt dùng cho vsftpd (FTPS), Postfix (TLS), Dovecot (IMAPS/POP3S)
+```
+
+Client (lab-user, lab-attacker) import `lab-ca.crt` vào kho tin cậy thì hết cảnh báo. Toàn bộ cert chỉ có giá trị trong lab.
+
+**d) Tường lửa cơ bản trên lab-mail (ufw):**
+
+```bash
+sudo ufw default deny incoming
+# Chỉ mở dịch vụ cần demo, và chỉ cho đúng dải lab (from 192.168.100.0/24)
+sudo ufw allow in on <tên-interface-lab> to any port 22,25,587,993,995 proto tcp
+sudo ufw allow in on <tên-interface-lab> to any port 21 proto tcp   # kịch bản A mới bật plain FTP
+sudo ufw enable
+# Xem interface: ip -br a  (trên VirtualBox Host-only thường là enp0s8/vboxnet0)
+```
+
+Nguồn: https://documentation.ubuntu.com ; https://manpages.ubuntu.com/manpages/jammy/man5/vsftpd.conf.5.html ; https://www.rfc-editor.org/rfc/rfc6761 (`.test`); https://www.rfc-editor.org/rfc/rfc959 (FTP); https://www.rfc-editor.org/rfc/rfc4217 (FTPS); https://datatracker.ietf.org/doc/html/rfc6409 (submission 587); https://www.openssl.org/docs/manstable/man1/openssl-req.html
+
+### 7.2 Kịch bản A — FTP plaintext vs SFTP: "mạng nội bộ cũng không vô hình"
+
+#### (1) Mục tiêu
+Chứng minh bản chất: FTP (RFC 959) gửi **toàn bộ điều khiển lẫn dữ liệu dạng plaintext** — gồm cả `USER`/`PASS` — nên ai nghe được đường truyền (eavesdropping/sniffing) là đọc được mật khẩu và nội dung file; trong khi SFTP (subsystem của SSH, cổng 22) che giấu bằng cách mã hóa (encryption) toàn bộ, kẻ bắt gói chỉ thấy một khối nhị phân (binary blob) không phân giải được. Người học hiểu vì sao các tài liệu quản trị (và chương 5) khuyến nghị bỏ plain FTP.
+
+#### (2) Sơ đồ luồng hoạt động
+
+```
+ Phase 1 — Plain FTP                          Phase 2 — SFTP
+ lab-user-XX(.30)  ──TCP 21──►  lab-mail(.10)  lab-user-XX(.30) ──TCP 22──► lab-mail(.10)
+ FileZilla: USER labftp          vsftpd         ssh -i id_ed25519:            sshd + sftp-
+ FileZilla: PASS <mật khẩu>                     handshake→kdf→aes256-ctr       server subsystem
+ FileZilla: RETR bai-thuc-hanh.txt             tất cả payload = ciphertext
+        │                                            │
+        ▼                                            ▼
+ lab-attacker-XX(.20): Wireshark capture enp0s8 (.20): Wireshark capture enp0s8
+ → filter "ftp" → THẤY rõ USER/PASS,   → filter "ssh" → chỉ thấy banner "SSH-2.0-..."
+   nội dung file (follow stream)         còn lại không decode được (không có key nào
+                                         để load vì SSH KHÔNG dùng keylog kiểu TLS)
+```
+
+#### (3) Điều kiện chuẩn bị
+- `lab-mail-XX`: vsftpd chạy plain (xem bước 4a), user hệ thống `labftp` với mật khẩu demo `Labftp@123`, file mẫu `/home/labftp/bai-thuc-hanh.txt` chứa một dòng đánh dấu dễ nhận (ví dụ `BI-MAT-LAB-DEMO-9F3K`).
+- `lab-user-XX`: FileZilla, `ssh`/`sftp` client; đã tạo cặp khóa `ssh-keygen -t ed25519` và copy pubkey vào `~labftp/.ssh/authorized_keys`.
+- `lab-attacker-XX`: Wireshark chạy trên interface của dải lab. Lưu ý kiến trúc: mạng Host-only/Internal của VirtualBox hoạt động như một switch ảo — mỗi VM chỉ nhận broadcast/multicast và các gói unicast gửi tới **chính IP của nó**, nên Wireshark trên máy này mặc định KHÔNG thấy traffic giữa hai VM khác; VMware Workstation có thể bật *Promiscuous Mode: Allow All* trên adapter host-only/LAN Segment, còn VirtualBox không có cơ chế tương đương cho host-only. Đơn giản nhất và đáng tin nhất cho demo là **chạy Wireshark ngay trên máy tham gia phiên** (lab-user ở kịch bản này).
+
+#### (4) Các bước thực hiện
+
+**Phase 1 — plain FTP:**
+
+```bash
+# lab-mail-XX: /etc/vsftpd.conf — cấu hình plain tối thiểu cho DEMO (sẽ gỡ ở phase 2)
+listen=YES
+anonymous_enable=NO        # tắt FTP ẩn danh
+local_enable=YES           # cho user hệ thống đăng nhập
+write_enable=NO            # chỉ đọc — giảm rủi ro trong lab
+xferlog_enable=YES         # bật log kết nối + transfer
+vsftpd_log_file=/var/log/vsftpd.log
+log_ftp_protocol=YES       # log MỌI lệnh FTP — bằng chứng đẹp cho báo cáo
+syslog_enable=YES          # ghi thêm vào syslog (auth.log/mail.* tùy distro)
+# systemctl restart vsftpd
+```
+
+- Mở Wireshark trên `lab-user-XX`, interface dải lab, filter `ftp || ftp-data`, bấm Start.
+- FileZilla → New Site: Host `192.168.100.10`, Protocol **FTP - File Transfer Protocol**, Encryption: *Only use plain FTP (insecure)*, User `labftp`, Pass `Labftp@123` → Connect → kéo `bai-thuc-hanh.txt` về.
+
+**Phase 2 — SFTP:** đổi FileZilla sang Protocol **SFTP - SSH File Transfer Protocol**, cổng 22, Logon Type *Key file* trỏ vào `id_ed25519` (không còn mật khẩu); hoặc trên terminal:
+
+```bash
+sftp -i ~/.ssh/id_ed25519 labftp@192.168.100.10
+sftp> get bai-thuc-hanh.txt
+```
+
+Capture lại với filter `ssh` trong lúc transfer.
+
+#### (5) Kết quả mong đợi
+- Phase 1: trong Wireshark, các gói "FTP" hiện nguyên văn `USER labftp`, `PASS Labftp@123` ngay trên khung nhìn (dissector FTP của Wireshark giải mã toàn bộ kênh điều khiển, dòng PASS nằm ngay sau dòng USER — chỉ một cú click là đọc được); chọn packet `RETR` → *Follow → TCP Stream* thấy cả nội dung file, gồm chuỗi `BI-MAT-LAB-DEMO-9F3K`.
+- Phase 2: chỉ đọc được đúng dòng banner `SSH-2.0-OpenSSH_...` (theo thiết kế SSH, version exchange diễn ra plaintext — RFC 4253); sau đó là ciphertext: không có `USER`, không `PASS`, không tên file, không nội dung.
+
+#### (6) Bằng chứng cần thu thập
+- 2 file `.pcapng` đặt tên `ftp-plain.pcapng`, `sftp-encrypted.pcapng` (File → Save).
+- 3 ảnh chụp: (i) dòng `USER`/`PASS` trong detail pane Wireshark; (ii) *Follow TCP Stream* của lệnh RETR thấy nội dung file; (iii) cùng vị trí trong capture SFTP chỉ là bytes hex.
+- Ảnh giao diện FileZilla thành công ở cả hai chế độ; excerpt `/var/log/vsftpd.log` (phase 1) và `/var/log/auth.log` dòng `Accepted publickey` (phase 2).
+
+#### (7) Log cần quan sát
+
+| Máy | Đường dẫn | Từ khóa grep |
+|---|---|---|
+| lab-mail | `/var/log/vsftpd.log` | `grep -E "OPEN|CLOSE|RETR|login" /var/log/vsftpd.log` — thấy toàn bộ phiên FTP do `log_ftp_protocol=YES` |
+| lab-mail | `/var/log/auth.log` | `grep -E "sshd.*(Accepted|Failed)" /var/log/auth.log` — phiên SFTP xác thực bằng publickey |
+
+#### (8) Biện pháp phòng thủ áp dụng
+Tắt plain FTP, chỉ dùng SFTP (hoặc tối thiểu FTPS — mục mở rộng); bắt buộc SSH dùng khóa, đặt `PasswordAuthentication no` trong `/etc/ssh/sshd_config` (kèm `PermitRootLogin no`) rồi `systemctl restart ssh`; giữ `write_enable=NO` nếu user chỉ cần đọc.
+
+#### (9) Kiểm thử lại sau phòng thủ
+1. Tắt vsftpd (`systemctl disable --now vsftpd`) và gỡ rule `21` khỏi ufw. Chạy lại đúng thao tác FileZilla plain FTP từ lab-user → báo lỗi *Connection refused/timed out*; Wireshark không còn gói `ftp` nào.
+2. Thử `sftp labftp@192.168.100.10` **nhập sai mật khẩu** (key không được cung cấp) → bị từ chối `Permission denied (publickey)` vì đã tắt PasswordAuthentication → chứng minh không còn kênh plaintext nào cho credential.
+3. Mở lại capture khi transfer SFTP thành công → đối chiếu: vẫn chỉ là ciphertext → kết luận phòng thủ đúng.
+
+#### Mở rộng (advanced): FTPS explicit + giải mã TLS bằng SSLKEYLOGFILE
+Bật FTPS trên vsftpd:
+
+```bash
+ssl_enable=YES                       # bật TLS cho FTP
+allow_anon_ssl=NO
+require_ssl_reuse=NO                 # tránh lỗi "No session reuse" với một số client
+rsa_cert_file=/etc/ssl/lab/lab-mail.crt
+rsa_private_key_file=/etc/ssl/lab/lab-mail.key   # cert từ CA nội bộ (mục 7.1.5c)
+# Client FileZilla chọn "Require explicit FTP over TLS" → AUTH TLS trên cổng 21
+```
+
+Khi đó capture `ftp` chỉ thấy phần điều khiển plaintext **trước** lệnh `AUTH TLS`, còn lại là TLS record. Để chứng minh "TLS giải mã được nếu giữ được key" (và vì sao phải khóa key như khóa nhà): với các client nền Mozilla/NSS (Firefox, **Thunderbird** — dùng cho IMAPS/SMTPS ở kịch bản khác), đặt biến môi trường `SSLKEYLOGFILE=/tmp/sslkey.log` rồi khởi động lại app, trỏ Wireshark vào *Edit → Preferences → Protocols → TLS → (Pre)-Master-Secret log filename* là xem lại toàn bộ traffic đã "mã hóa". FileZilla/GnuTLS không hỗ trợ keylog nên phần FTPS chỉ demo được ở mức "không đọc được mà không có key". Lưu ý kỹ thuật: phải capture từ trước ClientHello, không có session resumption, và kênh dữ liệu FTPS là TCP nối mới riêng (Decode As → TLS) — đây chính là các pitfall được cộng đồng Wireshark ghi nhận.
+
+#### (10) Rủi ro và quy tắc an toàn riêng của kịch bản
+- Mật khẩu `Labftp@123` chỉ tồn tại trong lab; **không** gõ mật khẩu này ở bất kỳ form/website nào sau bài demo để tránh thói quen reuse.
+- File `.pcapng` chứa mật khẩu plaintext của lab — coi như vật liệu nhạy cảm, không upload công khai (GitHub công khai, nhóm chat lớp...) trước khi báo cáo xong.
+- Chỉ sniff traffic dải lab; không bật promiscuous trên card kết nối Internet của máy thật.
+
+Nguồn: https://www.rfc-editor.org/rfc/rfc959 ; https://www.rfc-editor.org/rfc/rfc4217 ; https://wiki.wireshark.org/TLS ; https://manpages.ubuntu.com/manpages/jammy/man5/vsftpd.conf.5.html ; https://www.openssh.com/manual.html
+
+### 7.3 Kịch bản B — Brute-force có kiểm soát và phát hiện sớm bằng fail2ban
+
+#### (1) Mục tiêu
+Chứng minh chuỗi "nguy cơ → phát hiện sớm → phòng thủ" đã nêu ở chương 5–6: (a) tài khoản dùng mật khẩu yếu đăng nhập qua SSH/FTP/Dovecot **có thể bị đoán dần** bằng đúng kỹ thuật attacker dùng; (b) các lần thất bại lộ nguyên trong log; (c) fail2ban đọc log, đếm vi phạm trong cửa sổ thời gian (findtime) và **tự động chặn IP** (bantime) — biến tấn công "im lặng về mặt người quản trị" thành sự kiện được ngăn chặn và ghi nhận.
+
+#### (2) Sơ đồ luồng hoạt động
+
+```
+ lab-attacker-XX(.20)                      lab-mail-XX(.10)
+ for pass in <wordlist-demo>; do ─────────► sshd / vsftpd / dovecot
+   sshpass -p $pass ssh demo@.10           ├─ sai → ghi "Failed password for invalid
+   ftp -n .10  (USER/PASS sai)             │        user demo" → /var/log/auth.log
+ done (≤20 lần)                            ├─ vsftpd → /var/log/vsftpd.log
+                                           │
+                          fail2ban (daemon) ── tail logpath ── regex match
+                                           │   count ≥ maxretry trong findtime
+                                           ▼
+                                    banaction → iptables chain f2b-sshd
+                                    DROP mọi gói từ 192.168.100.20
+ Test lại: ssh từ .20 → "Connection timed out"  ← phòng thủ có hiệu lực
+```
+
+#### (3) Điều kiện chuẩn bị
+- fail2ban bản Ubuntu (`apt install fail2ban`), chưa cấu hình gì thêm; `sshd`, `vsftpd`, `dovecot` đang chạy (kế thừa từ kịch bản A — nhớ revert snapshot `before-A` nếu muốn môi trường sạch, hoặc dùng luôn).
+- User demo trên lab-mail: `sudo adduser demo` (mật khẩu `Demo@9999` — **cố tình yếu về độ phức tạp nhưng chỉ tồn tại trong lab**).
+- Wordlist demo 10–20 dòng, chỉ gồm mật khẩu giả: `demo1`, `demo123`, `Demo@1`, `Demo@2`, ..., `Labftp@123`, `admin2024`... **Không tải wordlist thật (rockyou...) về lab.**
+- Trên lab-mail mở sẵn: `tail -f /var/log/auth.log /var/log/vsftpd.log /var/log/mail.log`.
+
+> **Về công cụ chuyên dụng:** trong thực tế attacker dùng các framework brute-force như **hydra**, medusa, ncck... Tài liệu này chỉ ghi nhận *sự tồn tại* của chúng (chạy được trong lab đã phê duyệt) và **không** đưa cú pháp, vì một vòng lặp shell 10–20 lần thử cho bài demo đúng mục tiêu học mà rủi ro kỷ luật/pháp lý thấp hơn nhiều so với chạy công cụ quét tự động.
+
+#### (4) Các bước thực hiện
+
+**Bước 1 — brute-force có kiểm soát (từ lab-attacker-XX):**
+
+```bash
+# SSH: 15 lần thử sai + 1 lần thử đúng để thấy sự khác biệt trong log
+# -o ConnectTimeout=5: không treo nếu máy đích chậm; 'true': không mở shell phiên
+for pass in demo1 demo123 'Demo@1' 'Demo@2' 'Demo@3' 'Demo@4' 'Demo@5' \
+            'Labftp@123' admin2024 'passw0rd' 'demo!' '123456' 'qwerty' \
+            'letmein' 'iloveyou'; do
+  sshpass -p "$pass" ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
+      demo@192.168.100.10 true
+  sleep 1     # mô phỏng nhịp gõ của người — 1 lần/giây
+done
+sshpass -p 'Demo@9999' ssh -o StrictHostKeyChecking=no demo@192.168.100.10 echo OK
+# → dòng cuối đăng nhập ĐÚNG: nếu đây là attacker thật thì đã chiếm được tài khoản
+
+# FTP: cùng tư tưởng, dùng ftp -n (-n: không auto-login) kết hợp -s
+for pass in demo1 demo123 'Demo@1' 'Labftp@123' admin2024 'qwerty' '123456' \
+            'demo!' 'test' 'demo2024'; do
+  printf 'user demo %s\nquit\n' "$pass" | ftp -n 192.168.100.10 >/dev/null 2>&1
+  sleep 1
+done
+# Dovecot (IMAP): swaks CHỈ nói SMTP/ESMTP/LMTP, không hỗ trợ IMAP — muốn lặp lại
+# ý tưởng trên cổng 143/993 có thể dùng curl (thử LOGIN bằng đúng giao thức IMAP):
+#   for pass in demo1 demo123 'Demo@1'; do
+#     curl -s --url imap://192.168.100.10 --user "demo:$pass" >/dev/null 2>&1; sleep 1
+#   done
+# hoặc chỉ cần log dovecot do các lần Thunderbird nhập sai ở lab-user.
+```
+
+**Bước 2 — quan sát log realtime (trên lab-mail, ở terminal khác):** thấy dày đặc `Failed password for invalid user demo` (tùy biến `invalid` hay không — `demo` là user hợp lệ nên dòng log không có chữ `invalid`), và dòng cuối `Accepted password for demo`.
+
+**Bước 3 — bật phòng thủ fail2ban (trên lab-mail):**
+
+```bash
+sudo cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local   # KHÔNG sửa jail.conf gốc
+sudo nano /etc/fail2ban/jail.local
+```
+
+```ini
+[DEFAULT]
+bantime  = 600      # chặn 10 phút — chọn ngắn để còn demo bước retest trong buổi học
+findtime = 300      # đếm vi phạm trong 5 phút
+maxretry = 5        # 5 lần sai → ban (mặc định upstream của fail2ban cũng là 5)
+
+[sshd]
+enabled = true
+# vsftpd & dovecot: jail có sẵn trong bản Ubuntu — bật khi nào có kịch bản
+[vsftpd]
+enabled  = true
+port     = ftp
+logpath  = /var/log/vsftpd.log   # nếu distro log qua syslog, đổi thành /var/log/auth.log
+[dovecot]
+enabled  = true
+logpath  = /var/log/mail.log     # dovecot: "Disconnected (auth failed" ...
+
+sudo systemctl restart fail2ban
+fail2ban-client status            # xác nhận 3 jail đang chạy
+```
+
+Mẹo kiểm tra filter trước khi tin nó: `sudo fail2ban-regex /var/log/vsftpd.log /etc/fail2ban/filter.d/vsftpd.conf` — nếu match 0 thì jail không bao giờ ban (lỗi phổ biến nhất khi làm fail2ban).
+
+#### (5) Kết quả mong đợi
+- Sau ~6 phút (5 lần sai + findtime) fail2ban tự tạo chain `f2b-sshd` và chèn rule DROP nguồn `192.168.100.20`.
+- Lần thử tiếp theo (kể cả **đúng mật khẩu**) từ máy attacker → `ssh: connect to host ... port 22: Connection timed out`.
+- Người dùng hợp lệ `lab-user-XX` (.30) vẫn đăng nhập SSH **bình thường** — phòng thủ nhắm theo IP, không phá dịch vụ.
+
+#### (6) Bằng chứng cần thu thập
+- Ảnh excerpt `auth.log`/`vsftpd.log` có chuỗi `Failed` → `Ban` từ fail2ban.
+- Output các lệnh: `sudo iptables -L -n -v | grep -A5 f2b-sshd` (rule DROP + bộ đếm packet), `sudo fail2ban-client status sshd` (hiện `Banned IP list: 192.168.100.20`), tương tự `sudo fail2ban-client status vsftpd` cho jail FTP, `sudo ipset list f2b-sshd` (bản dùng ipset action), và excerpt `/var/log/fail2ban.log` dòng `... NOTICE Ban 192.168.100.20`.
+- Video/ảnh ssh timeout từ .20 **kèm** ảnh ssh thành công từ .30 (chứng minh tính chọn lọc).
+- File pcap Wireshark trên .20 cho thấy SYN gửi đi nhưng không có SYN-ACK trả về (gói bị DROP im lặng — khác REJECT sẽ trả ICMP).
+
+#### (7) Log cần quan sát
+
+| Máy | Đường dẫn | Từ khóa grep |
+|---|---|---|
+| lab-mail | `/var/log/auth.log` | `grep -E "Failed password\|Accepted\|session opened" /var/log/auth.log` |
+| lab-mail | `/var/log/vsftpd.log` | `grep -iE "FAILED\|login\|error" /var/log/vsftpd.log` (vsftpd qua PAM ghi cả vào auth.log: `authentication failure`) |
+| lab-mail | `/var/log/mail.log` | `grep -E "dovecot:.*auth failed\|Disconnected" /var/log/mail.log` |
+| lab-mail | `/var/log/fail2ban.log` | `grep -E "NOTICE Ban\|Restore Ban" /var/log/fail2ban.log` — "nhật ký phát hiện sớm" |
+
+*(Trên Ubuntu 22.04/24.04 nếu dịch vụ log vào journald thay vì file, đặt `backend = systemd` **trong từng jail** — biến trong `[DEFAULT]` đôi khi không propagate — hoặc dùng `journalctl -u ssh -f` để theo dõi.)*
+
+#### (8) Biện pháp phòng thủ áp dụng
+fail2ban (phát hiện sớm + chặn tự động theo log); kết hợp các lớp phòng thủ gốc: **tắt mật khẩu đăng nhập SSH, chỉ dùng khóa** (kịch bản A), chính sách mật khẩu mạnh, khóa tài khoản sau n lần sai (pam_faillock/pam_tally2), và ufw giới hạn cổng. Nhấn mạnh trong báo cáo: fail2ban là lớp *giảm sát thương*, không phải bức tường tuyệt đối — attacker đổi IP (botnet), gửi chậm dưới ngưỡng `maxretry`, hoặc brute-force hàng loạt tài khoản mỗi tài khoản 1 lần ("low and slow") là vượt qua được kiểu đếm-ngưỡng này.
+
+#### (9) Kiểm thử lại sau phòng thủ
+1. Chạy lại y nguyên vòng lặp SSH → quá 5 lần sai từ .20 → các lần *sau đó* timeout hoàn toàn (kể cả đúng pass): `ssh: ... timed out`.
+2. `sudo fail2ban-client status sshd` → .20 nằm trong danh sách ban; `sudo iptables -L -n -v` → chain `f2b-sshd` tăng packet counter đúng bằng số lần .20 bị chặn.
+3. Gỡ ban demo: `sudo fail2ban-client set sshd unbanip 192.168.100.20` → ssh từ .20 lại kết nối được, xác nhận ban là nguyên nhân chứ không phải cấu hình sai.
+4. Thử "né ngưỡng": 3 lần sai từ .20, chờ > `findtime` (6 phút), thử tiếp — không bị ban → chính bằng chứng cho đoạn "hạn chế của fail2ban" ở mục (8).
+
+#### (10) Rủi ro và quy tắc an toàn riêng của kịch bản
+- **Giới hạn 10–20 lần thử, sleep ≥ 1 s** giữa các lần: đủ tạo bằng chứng, không biến lab thành stress-test.
+- Wordlist chỉ chứa mật khẩu giả do nhóm nghĩ ra trong buổi đó.
+- Trước khi bật jail SSH, **giữ sẵn một terminal SSH đang mở từ máy host khác** hoặc cấu hình `ignoreip = 127.0.0.1/8 192.168.100.30` (loại trừ máy user thật và chính máy quản trị) — tránh cảnh fail2ban ban mất cả... nhóm mình.
+- Snapshot `before-B` để revert nếu jail cấu hình sai làm nghẽn dịch vụ của cả lớp (dùng chung máy chủ yếu không xảy ra với host-only riêng từng nhóm, nhưng quy tắc vẫn giữ).
+
+Nguồn: https://github.com/fail2ban/fail2ban/blob/master/config/jail.conf ; https://github.com/fail2ban/fail2ban/wiki ; https://manpages.ubuntu.com/manpages/jammy/man5/vsftpd.conf.5.html ; https://www.openssh.com/manual.html (sshd_config)
+
+### 7.4 Kịch bản C — Postfix open relay, phát hiện và khắc phục
+
+#### (1) Mục tiêu
+Hiểu bản chất **open relay**: máy chủ SMTP nhận thư *không thuộc miền của mình* từ người gửi *không được tin cậy* rồi chuyển tiếp đi tiếp (third-party relay) — ngày xưa là thiết kế cố hữu của Sendmail, ngày nay là **cấu hình sai**, và trở thành công cụ phát tán spam/thư mạo danh quy mô lớn. Người học tự tay: (a) tạo open relay do lỗi `mynetworks`; (b) chứng minh bằng swaks + queue Postfix; (c) khắc phục bằng `smtpd_relay_restrictions` + submission 587 có xác thực SASL qua Dovecot; (d) chứng minh bằng log trước/sau.
+
+#### (2) Sơ đồ luồng hoạt động
+
+```
+ TRƯỚC SỬA (open relay — mynetworks=0.0.0.0/0):
+ lab-attacker-XX(.20)                          lab-mail-XX(.10)              "Internet"
+ swaks --to external@nowhere.test ──SMTP25──►  Postfix smtpd:
+                                               permit_mynetworks (=.20 ✔) ──► 250 Ok: vào
+                                               queue → defer (DNS .test không phân giải
+                                               được — may mà lab không có đường ra!)
+
+ SAU SỬA:
+ .20 không auth ──SMTP25──► reject_unauth_destination → "554 5.7.1 Relay access denied"
+                                     │ log: "disconnect ... after RCPT"  → fail2ban đọc
+ .30 (Thunderbird) ──SMTPS 587──► permit_sasl_authenticated (Dovecot SASL) → 250 → giao
+       thư nội bộ demo@lab.local vào mailbox Dovecot → đọc lại bằng IMAPS 993
+```
+
+#### (3) Điều kiện chuẩn bị
+- Postfix đang chạy ở chế độ `Internet Site`, `mydestination = lab.local, localhost`, hostname `lab-mail-XX`.
+- `swaks` trên máy tester (công cụ kiểm thử SMTP chuẩn, một file Perl duy nhất — "Swiss Army Knife for SMTP", có sẵn trong kho Kali: `apt install swaks`).
+- Dovecot đã cài (đã có ở 7.1.5); user `demo` + user `mailtest` có mailbox thật (`mailtest` dùng cho auth submission).
+- Snapshot `before-C`.
+
+#### (4) Các bước thực hiện
+
+**Bước 1 — cố ý cấu hình SAI (chỉ trong phòng lab, chỉ vài phút):**
+
+```bash
+sudo postconf -e 'mynetworks = 0.0.0.0/0'   # SAI NGHIÊM TRỌNG: "mọi IP đều là bạn"
+sudo systemctl reload postfix
+postconf mynetworks    # xác nhận đã áp dụng
+```
+
+**Bước 2 — chứng minh open relay (từ lab-attacker-XX):**
+
+```bash
+swaks --to external@nowhere.test \
+      --from ai-dó@chu-gia-nao-do.test \
+      --server 192.168.100.10:25
+# Kết quả mong đợi trong transcript:
+#   << 250 ... RCPT To:<external@nowhere.test>
+# Nghĩa là: máy KHÔNG thuộc miền ta, người gửi KHÔNG auth, đích KHÔNG thuộc ta
+# → server vẫn đồng ý chuyển tiếp = OPEN RELAY.
+```
+
+Kiểm điểm trên server (bằng chứng queue):
+
+```bash
+postqueue -p    # thấy hàng đợi: một thư "deferred" tới nowhere.test
+                # (trong lab cô lập không phân giải/gửi được ra ngoài — nhưng về
+                #  nguyên tắc, nếu server này ở Internet nó ĐÃ chuyển tiếp spam)
+sudo postcat -q <queue-id> | head -40    # xem nguyên văn header/entry của thư demo
+```
+
+So sánh nhanh với công cụ kiểm tra relay chuẩn: các "open relay test" của MXToolbox/ABUSE.NET chính là tự động hóa đúng lệnh swaks trên (lab không truy cập được — chỉ nói để người học liên hệ thực tế).
+
+**Bước 3 — khắc phục đúng chuẩn:**
+
+```bash
+# (a) Thu hẹp mạng tin cậy về loopback — client lab KHÔNG còn là "mynetworks"
+sudo postconf -e 'mynetworks = 127.0.0.0/8 [::1]/128'
+
+# (b) Hàng rào relay tường minh, kết thúc bằng reject vĩnh viễn:
+sudo postconf -e 'smtpd_relay_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination'
+# permit_mynetworks         : chỉ loopback
+# permit_sasl_authenticated : ai đã auth (qua 587) thì được relay
+# reject_unauth_destination : còn lại → "554 5.7.1 <x>: Relay access denied"
+#   (lưu ý default Postfix dùng defer_unauth_destination = từ chối tạm 4xx;
+#    bản chính thức trong postconf là như vậy — dùng reject để trả lời dứt khoát)
+
+# (c) Mở submission 587 yêu cầu auth — theo RFC 6409 (MSA bắt buộc xác thực):
+sudo nano /etc/postfix/master.cf    # bỏ dấu # ở block submission và thêm -o:
+# submission inet n - y - - smtpd
+#   -o syslog_name=postfix/submission
+#   -o smtpd_tls_security_level=encrypt        # bắt buộc TLS trên 587 (RFC 8314)
+#   -o smtpd_sasl_auth_enable=yes              # buộc AUTH
+#   -o smtpd_relay_restrictions=permit_sasl_authenticated,reject  # không auth → từ chối
+#   -o milter_macro_daemon_name=SERVERING
+
+# (d) Nối SASL sang Dovecot (Dovecot vừa là auth server vừa quản lý mailbox):
+sudo postconf -e 'smtpd_sasl_type = dovecot'
+sudo postconf -e 'smtpd_sasl_path = private/auth'
+sudo postconf -e 'smtpd_sasl_auth_enable = no'   # 25 KHÔNG cần auth; 587 override = yes
+# /etc/dovecot/conf.d/10-master.conf — block auth cho Postfix:
+#   unix_listener /var/spool/postfix/private/auth {
+#     mode = 0660
+#     user = postfix
+#     group = postfix
+#   }
+# /etc/dovecot/conf.d/10-auth.conf: disable_plaintext_auth = no (chỉ vì lab demo
+#   không có CA được máy khách tin; ngoài thật phải = yes + TLS)
+sudo systemctl restart dovecot postfix
+sudo systemctl reload postfix
+```
+
+Cấp cert TLS cho Postfix/Dovecot từ CA mục 7.1.5c (`smtpd_tls_cert_file`, `smtp_tls_cert_file`, `ssl_cert`/`ssl_key` của Dovecot) — ở bài demo có thể chấp nhận tự ký trên Thunderbird sau khi import CA.
+
+**Bước 4 — kiểm chứng sau sửa:**
+
+```bash
+# 4a) Tester KHÔNG auth, port 25 → phải bị chặn:
+swaks --to external@nowhere.test --server 192.168.100.10:25
+#   mong đợi: << 554 5.7.1 <external@nowhere.test>: Relay access denied
+
+# 4b) Tester CÓ auth qua 587, gửi cho người nhận NỘI BỘ trong lab (an toàn tuyệt đối):
+swaks --to demo@lab.local --from mailtest@lab.local \
+      --server 192.168.100.10:587 --tls \
+      --auth-login --auth-user mailtest --auth-password '<mat-khau-demo>'
+#   mong đợi: << 250 ... Queued mail for delivery  → rồi demo@lab.local đọc được qua IMAPS
+
+# 4c) Lab-user thử Thunderbird (đổi SMTP server: 587 + STARTTLS/TLS + username/password)
+#     → gửi được cho demo@lab.local → chứng minh phòng thủ không chặn người dùng hợp lệ.
+```
+
+#### (5) Kết quả mong đợi
+Trước sửa: `RCPT TO: <external@nowhere.test>` trả `250` từ một máy không quen biết = bằng chứng open relay. Sau sửa: cùng lệnh trả `554 5.7.1`; thư chỉ vào queue khi và chỉ khi người gửi đã SASL-auth qua 587 có TLS. Bảng so sánh trước/sau chính là deliverable của kịch bản.
+
+#### (6) Bằng chứng cần thu thập
+- Transcript swaks 2 lần (250 vs 554) — copy nguyên khối có timestamp.
+- `postqueue -p` trước sửa (thư deferred trong queue) và `postcat` entry demo.
+- Ảnh: Thunderbird gửi qua 587 thành công + IMAPS đọc lại thư trong INBOX.
+- `netstat -tlnp | grep -E ":25|:587"` (hoặc `ss -tlnp`) chụp hai trạng thái master.cf.
+
+#### (7) Log cần quan sát
+
+| Máy | Đường dẫn | Từ khóa grep |
+|---|---|---|
+| lab-mail | `/var/log/mail.log` | `grep -E "postfix/smtpd.*(Relay access denied\|after RCPT\|disconnect\|client=)" /var/log/mail.log` |
+| lab-mail | `/var/log/mail.log` | `grep "postfix/cleanup" mail.log` — dòng `message-id=` mỗi lần nhận thư thành công |
+| lab-mail | `/var/log/mail.log` | `grep -E "submission.*SASL.*(fail|denied)" /var/log/mail.log` — auth thất bại trên 587 |
+| lab-mail | hàng đợi | `postqueue -p`; xóa demo: `postsuper -d ALL deferred` |
+
+Log mẫu của một phiên bị chặn (đúng mẫu hay gặp trong mail.log):
+
+```
+postfix/smtpd[1234]: NOQUEUE: reject: RCPT from lab-attacker-xx[192.168.100.20]:
+    554 5.7.1 <external@nowhere.test>: Relay access denied;
+    from=<ai-do@chu-gia-nao-do.test> to=<external@nowhere.test> proto=ESMTP
+postfix/smtpd[1234]: disconnect from lab-attacker-xx[192.168.100.20]
+    ehlo=1 mail=1 rcpt=0/1 quit=1 commands=3/4
+```
+
+Có thể bật thêm jail `[postfix]` trong fail2ban (logpath `/var/log/mail.log`) để chặn brute-force SMTP AUTH — liên kết trực tiếp với kịch bản B.
+
+#### (8) Biện pháp phòng thủ áp dụng
+Nguyên tắc một hàng rào duy nhất cho relay: **`smtpd_relay_restrictions` luôn kết thúc bằng `reject_unauth_destination`** (hoặc `defer_unauth_destination`) và không đặt `mynetworks` rộng; tách vai: 25 chỉ nhận thư server-to-server cho miền mình, người dùng cuối phải vào 587/465 kèm **auth + TLS** (RFC 6409 + RFC 8314); dùng Dovecot SASL làm nguồn auth duy nhất một chỗ; và luôn nghĩ tới "phòng phát hiện": mail.log + fail2ban.
+
+#### (9) Kiểm thử lại sau phòng thủ
+1. Chạy lại nguyên văn lệnh swaks bước 2 → nhận `554 5.7.1` → không có thư nào mới vào queue (`postqueue -p` = "Mail queue is empty") → attacker/lab-user không auth **không còn làm được như trước**.
+2. Quét bằng chính danh sách người nhận đa dạng: `--to user@gmail.com`, `--to root@mta.edu`... tất cả đều `554` (chỉ đích thuộc `mydestination`/`relaydomains` mới đi tiếp).
+3. `swaks --auth` với **sai mật khẩu** → `535` + dòng `SASL: PLAIN auth failed` trong log → thử 6 lần sai từ .20 → jail `[postfix]`/`[dovecot]` ban IP (nối với B).
+4. `sudo postconf -n | grep -E "mynetworks|smtpd_relay_restrictions"` đính kèm báo cáo như "cấu hình chuẩn cuối kỳ".
+
+#### (10) Rủi ro và quy tắc an toàn riêng của kịch bản
+- Trạng thái `mynetworks=0.0.0.0/0` chỉ tồn tại trong **vài phút**, trong host-only không có đường ra Internet, giữa snapshot trước/sau. Không bao giờ giữ cấu hình này khi bật card NAT.
+- Người nhận "bên ngoài" bắt buộc dùng đuôi `.test` (RFC 6761) → kể cả lỡ còn relay sót, DNS không phân giải → không thư nào tới người thật; trước khi rời phòng lab luôn `postsuper -d ALL deferred`.
+- Thư demo chứa nội dung giả; không dùng tài khoản/mailbox thật của cá nhân làm người nhận.
+- Không gửi thư hàng loạt (dù nội bộ) để "test hiệu năng" — vượt quá nhu cầu bằng chứng, có thể làm nghẽn queue và gợi nhầm hành vi spam.
+
+Nguồn: https://www.postfix.org/SMTPD_ACCESS_README.html ; https://www.postfix.org/postconf.5.html ; https://www.postfix.org/SASL_README.html ; https://datatracker.ietf.org/doc/html/rfc6409 ; https://www.rfc-editor.org/rfc/rfc5321 (STD 10) ; https://www.rfc-editor.org/rfc/rfc8314 (TLS considerations) ; https://www.jetmore.org/john/code/swaks/ ; https://www.kali.org/tools/swaks/ ; https://doc.dovecot.org/
+
+### 7.5 Kết nối ba kịch bản thành một câu chuyện
+
+Ba kịch bản ghép lại thành đúng mô hình của đồ án: **A** chỉ ra vì sao plaintext chết (mật khẩu và dữ liệu lộ trên wire) → dẫn tới phòng thủ bằng mã hóa (SSH/TLS); **B** chỉ ra rằng cả khi đã mã hóa, kênh vẫn bị "mò" (credential guessing) → cần *phát hiện sớm* từ log + phản ứng tự động (fail2ban); **C** chỉ ra dịch vụ mail nếu cấu hình sai thì trở thành kẻ tiếp tay phát tán thư rác → cần thiết kế phân vai (25 vs 587) + bắt buộc xác thực. Mỗi kịch bản đều có vòng "kiểm thử lại sau phòng thủ", biến báo cáo đồ án từ mô tả thành **chứng minh thực nghiệm**: trước/sau có pcap, log excerpt và ảnh chụp màn hình kèm snapshot nhất quán.
+
+---
+
+## 8. Chuẩn bị báo cáo và tiêu chí đánh giá
+
+Chương này là phần "dàn dựng" của đồ án: sau khi đã nghiên cứu giao thức (chương 1–2), triển khai lab (chương 3) và phân tích tấn công/phòng thủ (chương 4–6), nhóm cần đóng gói toàn bộ thành một báo cáo học thuật mạch lạc, kèm bộ ảnh chứng minh (evidence) mà giám khảo có thể kiểm tra lại được. Phần dưới đây đề xuất bố cục báo cáo, các bảng tổng hợp then chốt nên đưa vào phụ lục chính, quy ước đặt tên và che thông tin nhạy cảm khi chụp ảnh, cuối cùng là checklist tiêu chí "demo thành công" cho từng kịch bản.
+
+> **Nguyên tắc xuyên suốt:** mọi số liệu, ảnh chụp, dòng log trong báo cáo phải đến từ lab riêng của nhóm, với mật khẩu giả định và tên miền giả định (ví dụ `lab.example`, `example.invalid`). Không dùng hệ thống thật, không tấn công ra ngoài phạm vi lab, không phát tán thư thật.
+
+### 8.1. Bố cục báo cáo đề xuất
+
+Báo cáo đề xuất gồm **10–15 trang thân** (không tính phụ lục), theo trình tự sau. Cấu trúc này đi theo đúng logic "học → làm → chứng minh → đánh giá" mà hội đồng thường chờ đợi ở đồ án an toàn thông tin cấp đại học: người đọc phải thấy bạn hiểu bản chất giao thức trước, rồi mới thấy bạn làm chủ công cụ.
+
+| Phần | Dung lượng | Nội dung chính |
+|---|---|---|
+| Trang bìa | 1 | Tên đồ án, lớp, mã nhóm NN, thành viên, GVHD, học kỳ |
+| Abstract / Tóm tắt | 0,5 | 150–250 từ: tóm tắt vấn đề (dịch vụ FTP/mail dễ bị nghe lén & brute-force), phương pháp (lab + 3 kịch bản), kết quả chính, kết luận |
+| Mục lục | 0,5 | Tự động sinh (LibreOffice/Word → References → Table of Contents) |
+| 1. Giới thiệu | 1 | Động lực, mục tiêu, phạm vi; **nêu rõ giới hạn lab**: mạng ảo riêng (VirtualBox/VMware NAT + host-only), không kết nối internet công cộng, mọi attack chỉ nhắm vào máy trong lab của nhóm |
+| 2. Kiến thức nền | 2–3 | Tóm tắt chương 1–2: mô hình client-server, bắt tay ba bước (three-way handshake), TCP ports, vòng đời SMTP transaction, mô hình mailbox của IMAP vs POP3, khác biệt SFTP (ứng dụng SSH) so với FTPS (FTP + TLS) |
+| 3. Môi trường lab & triển khai | 2–3 | Sơ đồ tô-pô (2–3 VM Ubuntu Server: srv-ftp, srv-mail, máy attacker Kali/Ubuntu client); **bảng cấu hình chính — chỉ liệt kê tham số bảo mật**: `ssl_enable`, `anonymous_enable=NO`, `chroot_local_user=YES`, Postfix `smtpd_relay_restrictions`, Dovecot `ssl`, jail fail2ban, rule iptables/nftables. Không copy toàn file cấu hình vào thân báo cáo — để ở phụ lục |
+| 4. Phân tích nguy cơ | 2 | Bảng nguy cơ → dấu hiệu → log → phòng ngừa (bản rút gọn của mục 8.3 bên dưới, đầy đủ 13 dòng) |
+| 5. Thực nghiệm 3 kịch bản A/B/C | 3–4 | Mỗi kịch bản theo 5 bước: **mục tiêu → cách làm → kết quả → ảnh chứng minh → kết luận**. Đây là phần "ăn điểm" nhất — ảnh phải sắc nét, có khung đỏ đánh dấu dòng quan trọng |
+| 6. Đánh giá & khuyến nghị | 1–1,5 | Những gì lab chứng minh được; **what-if nếu có thêm thời gian**: tự động hóa chứng thư bằng ACME/Let's Encrypt (hết hạn cert là lỗi kinh điển), gom log vào SIEM (Wazuh/Grafana+Loki) thay vì đọc tay, MFA cho SSH/webmail; thừa nhận hạn chế (lab nhỏ, chưa lượng traffic lớn, fail2ban không chống được distributed low-and-slow) |
+| 7. Kết luận | 0,5 | Trả lời đúng mục tiêu đã nêu ở phần 1 |
+| Phụ lục | không giới hạn | A: cấu hình đầy đủ; B: bảng log gốc (raw log trích đoạn); C: checklist demo của mục 8.6 |
+
+Mẹo trình bày: thống nhất font (Times New Roman 13 hoặc 14 cho tiếng Việt có dấu hiển thị tốt), mã nguồn/log để trong khung `monospace`, mỗi ảnh có caption "Hình N: mô tả — chụp tại srv-ftp-NN, ngày ...".
+
+Nguồn: kinh nghiệm trình bày báo cáo đồ án; tài liệu giao thức dẫn ở 8.2.
+
+### 8.2. Bảng so sánh 5 giao thức (đưa vào chương 2 hoặc phụ lục)
+
+Bảng này nên đặt ở đầu phần phân tích để giám khảo có "bản đồ" trước khi đi vào chi tiết. Đọc bảng cần nắm hai khái niệm: **mã hóa ở lớp nào** — SFTP mã hóa ngay từ gói đầu tiên vì nó là kênh con (channel) của SSH, còn FTP/SMTP/POP3/IMAP gốc đều khởi sinh (originate) từ plaintext rồi mới "nâng cấp" lên TLS qua lệnh STARTTLS/AUTH TLS (hoặc dùng biến thể cổng kín như FTPS/IMAPS/POP3S). Đó chính là gốc rễ của các tấn công downgrade/stripping ở chương 4.
+
+| Giao thức | RFC/chuẩn | Mục đích | Cổng mặc định (明文 — plaintext) | Cổng an toàn | Có encryption mặc định? | Xác thực | Mô hình | Ghi chú |
+|---|---|---|---|---|---|---|---|---|
+| FTP | RFC 959 (1985) | Truyền file | 21 (điều khiển) + 20 (data ở active mode) | — (bản thân không có) | **Không** — USER/PASS đi rõ văn bản | username/password FTP thuần | Client–server, 2 kênh TCP tách biệt | Đã cũ; chuyển sang SFTP/FTPS. Lệnh PORT/EPRT tạo kênh data → nguy cơ FTP bounce |
+| SFTP | Không phải RFC chuẩn hóa độc lập — đặc tả IETF draft `draft-ietf-secsh-filexfer` (SSH File Transfer Protocol), chạy trên SSH (RFC 4253) | Truyền file | — | 22 (chung cổng SSH) | **Có** — toàn bộ phiên nằm trong encrypted SSH transport | Key SSH / password qua kênh đã mã hóa | Client–server, 1 kênh TCP | Khác FTPS hoàn toàn; không có khái niệm active/passive data port → dễ firewall |
+| SMTP | RFC 5321 (2008) | Gửi/mail transfer | 25 (MTA-to-MTA) | 587 submission + STARTTLS (RFC 3207, RFC 6409); 465 SMTPS | **Không** — mặc định明文, nâng cấp bằng `STARTTLS` | Có/không `AUTH` (SASL); MTA-to-MTA thường không auth | Store-and-forward, push | OPEN RELAY = cấu hình sai nghiêm trọng nhất |
+| POP3 | RFC 1939 (1996) | Nhận mail (download-and-delete) | 110 | 995 (POP3S) | **Không** — `USER`/`PASS` rõ văn bản | USER/PASS hoặc APOP (yếu) | Client–server, kéo (pull) | STATELESS sau download; không phù hợp multi-device |
+| IMAP | RFC 9051 — **IMAP4rev2 (2021)**, thay thế RFC 3501 (IMAP4rev1, 2003) | Nhận mail (server-side mailbox) | 143 | 993 (IMAPS) | **Không** mặc định, có `STARTTLS`; IMAP4rev2 coi TLS là bắt buộc cho triển khai mới | LOGIN/SASL; rev2 tích hợp sẵn SASL-IR, IDLE, MOVE | Client–server, đồng bộ mailbox 2 chiều | Phức tạp hơn POP3 → attack surface lớn hơn |
+
+Ba điểm cần "đọc thấy" từ bảng:
+
+1. **Cả 5 giao thức gốc đều được thiết kế trước khi TLS phổ biến** (RFC 951/959 là 1984–1985, RFC 821/SMTP 1982, POP3 từ 1988→1996). Vì vậy encryption là "dán thêm" (STARTTLS/AUTH TLS) chứ không phải mặc định — đây là lý do Wireshark vẫn bắt được mật khẩu FTP/POP3/IMAP/SMTP AUTH trong lab của ta.
+2. **SFTP là kẻ duy nhất có encryption mặc định**, không phải vì thiết kế tốt hơn mà vì nó sinh sau (1997–2001, trong lòng SSH) và thừa kế encrypted transport.
+3. Chuẩn hiện hành đã "dời" về phía encryption: TLS 1.3 là RFC 8446, **RFC 8996 (2021) chính thức deprecated TLS 1.0/1.1**; IETF cũng khuyến cáo "cleartext considered obsolete" cho mail (RFC 8314). Trong lab, nếu client của nhóm vẫn kết nối được bằng TLS 1.0 thì đó là bằng chứng server cần sửa.
+
+Nguồn:
+- https://www.rfc-editor.org/rfc/rfc959
+- https://www.rfc-editor.org/rfc/rfc5321
+- https://www.rfc-editor.org/rfc/rfc1939
+- https://www.rfc-editor.org/rfc/rfc9051
+- https://www.rfc-editor.org/rfc/rfc4253
+- https://www.rfc-editor.org/rfc/rfc8446
+- https://www.rfc-editor.org/rfc/rfc8996
+- https://www.rfc-editor.org/rfc/rfc8314
+
+### 8.3. Bảng ánh xạ Nguy cơ → Dấu hiệu → Log → Phòng ngừa
+
+Đây là "xương sống" của chương 4 báo cáo, gộp từ chương 4 (nguy cơ), chương 5 (log & phát hiện sớm) và chương 6 (phòng ngừa) của đồ án. 13 dòng, mỗi dòng là một cặp attack–defense khép kín, đúng tinh thần "attacker chỉ cần 1 lỗi, defender phải vá hết". Khi đưa vào báo cáo chính, giữ nguyên thứ tự theo giao thức để người đọc khỏi nhảy cóc.
+
+| # | Nguy cơ (risk) | Dấu hiệu (sign) quan sát được | Log (đường dẫn thật trong lab Ubuntu) | Phòng ngừa chính |
+|---|---|---|---|---|
+| 1 | Nghe lén mật khẩu FTP (plaintext sniffing) | Trong capture Wireshark xuất hiện dòng `USER labftp01` / `PASS passlab123` rõ văn bản | Không có trong log server (server không biết bị sniff) → phát hiện bằng capture phía mạng | Thay FTP bằng SFTP/FTPS; buộc `ssl_enable=YES`, `local_umask`, `ftp_ssl_enable`... với vsftpd: `ssl_enable=YES` + `allow_anon_ssl=NO` |
+| 2 | Brute-force đăng nhập FTP | Chuỗi `FAIL LOGIN` lặp cùng IP, nhịp đều mỗi ~1s | `/var/log/auth.log` (PAM: `pam_unix(vsftpd:auth): authentication failure`) + `/var/log/vsftpd.log` nếu bật `xferlog_enable` | fail2ban jail `[vsftpd]`, `maxretry=5`, `bantime` tăng dần; password độ dài ≥12 |
+| 3 | Anonymous FTP bị lợi dụng upload malware | Thư mục `incoming/` có file lạ; log `OK UPLOAD` từ user `ftp`/`anonymous` | `/var/log/vsftpd.log` (dòng `upload` khi `xferlog_std_format=NO`), `find /srv/ftp -newer ...` | `anonymous_enable=NO`; nếu bắt buộc: read-only, no-write, cách ly thư mục |
+| 4 | FTP bounce / PORT độc hại (server connect trở lại host khác) | Log kết nối data tới IP/port bất thường, `connect_timeout` lặp | `/var/log/vsftpd.log`; `ss -tnp` thấy server initiate kết nối outbound port cao | `pasv_enable=YES` + `pasv_min_port`/`pasv_max_port` chặn ở firewall; vsftpd tự chặn PORT ngoài cùng IP |
+| 5 | Brute-force SSH/SFTP | `/var/log/auth.log`: `Failed password for invalid user` dày đặc từ 1 IP | `/var/log/auth.log` (journald: `journalctl -u ssh`) | Jail `[sshd]` của fail2ban; khóa password auth: `PasswordAuthentication no`, chỉ dùng key |
+| 6 | Open relay SMTP (spammer dùng server gửi ra ngoài) | Queue đầy mail tới domain lạ: `postqueue -p` / `mailq` nhiều dòng `*@*` ngoài lab | `/var/log/mail.log`: `status=sent` tới recipient ngoài, kèm IP client lạ | Postfix: `smtpd_relay_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination` |
+| 7 | Brute-force SMTP AUTH | `SASL LOGIN authentication failed` lặp | `/var/log/mail.log` (Postfix) + `/var/log/auth.log` (saslauthd) | Jail `[postfix-sasl]`, rate-limit submission, fail2ban |
+| 8 | Giả mạo email (spoofing domain của lab) | Nhận thư có `From: admin@lab.example` trong khi lab không gửi | `/var/log/mail.log` dòng `header=Received` chuỗi đầu cuối; kiểm tra DNS SPF | SPF (RFC 7208) `-all`, DKIM (RFC 6376) ký bởi OpenDKIM, DMARC (RFC 7489) `p=quarantine`→`reject` |
+| 9 | Nghe lén POP3/IMAP password | Capture thấy `USER`/`PASS` (POP3) hoặc `LOGIN "..." "..."` (IMAP)明文 | Server không log nội dung → chỉ phát hiện được khi phân tích mạng | Dovecot: `ssl = required`, tắt plaintext auth; dùng cổng 993/995 |
+| 10 | Brute-force IMAP/POP3 | `Disconnected (Auth failed)` lặp cùng IP trong 1 phút | `/var/log/mail.log` (Dovecot: `auth: Info: ... Disconnected (Auth failed)`) | Jail `[dovecot]` của fail2ban; lockout theo user |
+| 11 | Chứng thư hết hạn / self-signed bị bỏ qua (MITM) | Client Thunderbird báo `Your certificate is not secure` hoặc im lặng vì user bấm "Accept" | Nhật ký cert phía server không có; check `openssl s_client -connect ...:993` → `NotAfter` | Cert tự động qua ACME (certbot) — hết hạn là lỗi vận hành, không phải lỗi tấn công; pin cert |
+| 12 | Lấn chiếm ngoài chroot của user FTP | User `labftpNN` đọc được `/etc/passwd` qua symlink hoặc upload vào web dir | `/var/log/vsftpd.log`; `find` trong home bất thường | `chroot_local_user=YES`, `secure_chroot_dir` của vsftpd; chmod 750, owner root cho thư mục gốc chroot |
+| 13 | Quét cổng & enumeration (đ reconnaissance) | `ss -tlnp` cho thấy 21/110/143 vẫn mở dù đã "khai tử" service; log `connect timeout`/RST dồn dập | `/var/log/kern.log` nếu iptables `LOG`; `nmap` chủ động phía attacker phát hiện | Đóng cổng PLAINTEXT 21/110/143 bằng firewall: chỉ expose 22, 990, 993, 995, 587; ẩn banner |
+
+Cách dùng bảng trong báo cáo: mỗi dòng nên được "neo" bằng ít nhất 1 ảnh chứng minh ở chương 5 (mục 8.4 liệt kê ảnh nào). Bảng này cũng là cơ sở cho kết luận phần 6: mọi nguy cơ đều có ít nhất một lớp phòng thủ "cấu hình đúng" — không nguy cơ nào cần công cụ thương mại.
+
+Nguồn:
+- https://www.rfc-editor.org/rfc/rfc7208 (SPF)
+- https://www.rfc-editor.org/rfc/rfc6376 (DKIM)
+- https://www.rfc-editor.org/rfc/rfc7489 (DMARC)
+- https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/9/html/monitoring_and_managing_system_status_and_health/configuring-the-very-secure-ftp-daemon-vsftpd-for-file-transfers_monitoring-and-managing-system-status-and-health (vsftpd security options)
+- https://www.postfix.org/STANDARD_CONFIGURATION_README.html
+- https://doc.dovecot.org/configuration_manual/authentication/
+- https://github.com/fail2ban/fail2ban (jail/filter mẫu trong `filter.d/`, `jail.d/`)
+- https://documentation.ubuntu.com/server/how-to/security/ (Ubuntu Server docs: openssh, firewall)
+
+### 8.4. Danh sách ảnh cần chụp (checklist khi demo)
+
+Ảnh là bằng chứng. Một demo "chạy được" mà không có ảnh đúng chuẩn cũng mất điểm như demo lỗi. Khi kết thúc buổi demo, từng thành viên đối chiếu danh sách này — thiếu ảnh nào phải chụp bù ngay khi môi trường còn sống (đặc biệt các ảnh "trước khi" — vì sau khi bật phòng thủ thì không chụp lại được trạng thái yếu nữa). Quy ước đặt tên theo mục 8.5.
+
+| # | Nội dung ảnh | Chụp trên | Chứng minh cho dòng bảng 8.3 |
+|---|---|---|---|
+| 1 | Sơ đồ tô-pô lab (vẽ draw.io, chụp màn hình) | — | Giới hạn phạm vi an toàn (mục 1 báo cáo) |
+| 2 | `ss -tlnp` hiển thị toàn bộ listening ports | srv-ftp-NN, srv-mail-NN | Trạng thái cổng trước/sau hardening |
+| 3 | Wireshark capture phiên FTP thấy `USER`/`PASS` rõ văn bản — **follow TCP stream**, khung đỏ 2 dòng đó, redact phần không liên quan | Máy attacker | Dòng 1, 9 |
+| 4 | Wireshark capture cùng cảnh với SFTP: chỉ toàn entropy, KHÔNG có chuỗi `USER` | Máy attacker | Đối chứng: SFTP an toàn |
+| 5 | `/var/log/auth.log` thời điểm TRƯỚC khi bật fail2ban: dày đặc `FAIL LOGIN` / `Failed password` | srv-ftp-NN / srv-mail-NN | Dòng 2, 5, 10 |
+| 6 | `fail2ban-client status sshd` (và `vsftpd`) — thấy `Currently banned: N` | srv-mail-NN | Dòng 5: hệ thống phản ứng |
+| 7 | `ipset list f2b-sshd` hoặc `iptables -L -n -v` thấy IP test nằm trong chain `FAIL2BAN-SSH` | srv-mail-NN | Bằng chứng "ban thật", không phải log suông |
+| 8 | Terminal client bị timeout/không connect được sau khi ban (chứng minh bantime có hiệu lực) | Máy attacker | Kiểm thử end-to-end |
+| 9 | Kết quả `swaks`/`nc` cho SMTP TRƯỚC hardening: `250 2.0.0 Ok: queued` khi relay ra ngoài | srv-mail-NN | Dòng 6 (open relay mở) |
+| 10 | Cùng lệnh SAU hardening: `554 5.7.1 <user@example.org>: Relay access denied` | srv-mail-NN | Dòng 6 (đã đóng) — cặp ảnh 9/10 là "ảnh đinh" của kịch bản C |
+| 11 | Hội thoại `EHLO` hiển thị `250-STARTTLS` trước/sau, hoặc Thunderbird dialog cấu hình IMAPS (cổng 993, `SSL/TLS`) | Máy client | Dòng 9, 11 |
+| 12 | `postconf -n` / `postqueue -p` rỗng + `mail.log` cho thấy auth submission thành công (`status=sent` khi có SASL) | srv-mail-NN | Dòng 6, 7: relay đúng phải vẫn chạy |
+| 13 | `diff -u vsftpd.conf.before vsftpd.conf.after` (hoặc highlight 4 dòng thay đổi) | srv-ftp-NN | Dòng 1, 3, 12: giá trị của hardening là cấu hình |
+| 14 | Đầu ra `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` (fingerprint) — minh chứng không chụp private key | srv-*-NN | Tuân thủ mục 8.5 |
+| 15 | `fail2ban-regex /var/log/auth.log filter` chạy khớp N dòng (tránh bantime "ảo" do regex sai) | srv-mail-NN | Độ tin cậy phát hiện sớm |
+
+Yêu cầu kỹ thuật chung cho mọi ảnh: độ phân giải đủ đọc chữ (≥1280px ngang), font terminal to vừa phải, nền tối chữ sáng đồng nhất, và **duy nhất một thông điệp mỗi ảnh** — đánh mũi tên/ô đỏ vào đúng dòng cần xem, caption ghi rõ ảnh chứng minh điều gì.
+
+Nguồn:
+- https://www.wireshark.org/docs/ (Guide: Follow TCP Stream; filter `ftp`, `ssh`)
+- https://github.com/jetmore/swaks (công cụ SMTP test — ảnh 9, 10, 12)
+- https://www.thunderbird.net/ (client cho ảnh 11)
+
+### 8.5. Quy ước đặt tên theo nhóm và che thông tin nhạy cảm
+
+**Vì sao phải đặt tên theo mã nhóm (NN).** Khi nhiều lab của các nhóm cùng chạy trên một phòng máy / cùng dải VLAN, và khi ảnh của em nằm lẫn trong phụ lục của nhóm khác, giám khảo cần trả lời được trong 5 giây: "cái này là của ai, kịch bản nào, trước hay sau khi sửa?". Vì vậy thống nhất:
+
+- **Hostname:** `srv-ftp-NN`, `srv-mail-NN`, `attacker-NN` (NN = mã nhóm 2 chữ số). Đặt trong `/etc/hostname` + `/etc/hosts` — và vì hostname xuất hiện trong SMTP banner/Helo, chỉ cần nhìn log là biết của nhóm nào.
+- **User FTP:** `labftpNN` (không dùng tên chung `ftpuser` vì dễ trùng khi gom file).
+- **Subject email test:** `[LAB-NN] demo relay test` — để khi lục `mail.log` hoặc queue, dòng của nhóm mình nổi lên ngay, và khi lỡ có thư "thoát" ra ngoài thì cũng nhận diện được nguồn gốc tức thì (dù theo nội quy, thư không được phép ra ngoài lab).
+- **File ảnh bằng chứng:** `NN-<kịch bản>-<công cụ>-<nội dung>[-<thời điểm>].png`, ví dụ `01-A-wireshark-ftp-plaintext-before.png`, `01-C-postfix-relay-554-after.png`.
+- **Tên mail domain lab:** `lab.example` hoặc `example.invalid` (`.invalid`, `.example`, `.test` là các TLD được RFC 6761/2606 dành riêng cho mục đích thử nghiệm — không bao giờ resolve ra hệ thống thật, nên dù có lỗi cấu hình cũng không gửi thư tới người dùng thật được).
+
+**Che thông tin nhạy cảm trong ảnh (redaction).** Báo cáo và ảnh có thể được upload lên LMS — coi như đã "công bố". Do đó:
+
+1. **Không dùng mật khẩu thật ở bất kỳ đâu**, kể cả trong lab. Toàn bộ demo dùng mật khẩu giả định công khai trong báo cáo: `passlab123`. Lý do kép: không lộ pass thật nếu ảnh bị phát tán; và giám khảo đọc được đúng pass để hiểu capture.
+2. **Redact trước khi nộp** bằng Paint/GIMP: che IP công cộng (nếu VM có NAT/IP thật ngoài dải lab), hostname máy của trường, tên người dùng Windows trong đường dẫn `C:\Users\...`. Kỹ thuật: hình chữ nhật đặc (solid fill), KHÔNG dùng bút nhớ mờ/blur nhẹ — blur vẫn có thể recover được bằng công cụ.
+3. **Private key: không bao giờ chụp**, kể cả đã "che một phần". Chỉ chụp fingerprint: `ssh-keygen -lf ~/.ssh/id_ed25519.pub` (fingerprint là dữ liệu công khai, an toàn). Tương tự, chỉ chụp `.pub`, không chụp file không đuôi.
+4. **Không chụp `/etc/shadow` thật.** Nếu cần minh chứng hash, dùng hàng mẫu: `labftp01:$6$rounds=...$<hash-mẫu>:0:99999:7:::` tự sinh trên máy khác hoặc bịa giá trị hash.
+5. **Mật khẩu mặc định phải đổi trước khi demo live** — một giám khảo có thể bấm "thử đăng nhập" ngay; nếu họ vào được bằng `admin/admin` thì mọi ảnh chứng minh đều vô giá trị.
+6. Khi quay màn hình/ảnh, đóng mọi tab trình duyệt, messenger có chứa thông tin cá nhân; chụp ở độ phân giải vừa đủ, không "chụp luôn cả desktop 4K" rồi mới cắt — dễ sót vùng chưa redact.
+
+Nguồn:
+- https://www.rfc-editor.org/rfc/rfc6761 (Special-Use Domain Names: `.invalid`)
+- https://www.rfc-editor.org/rfc/rfc2606 (Reserved Top-Level DNS Names: `.example`, `.test`)
+- https://www.gimp.org/ (công cụ redact)
+
+### 8.6. Tiêu chí đánh giá demo thành công (checklist từng kịch bản)
+
+Mỗi kịch bản cần "đỗ" theo tiêu chí đo được (objective) — không chấp nhận "demo đại khái nó chạy". Khuyến nghị: tập dượt theo đúng checklist này, người này đóng vai giám khảo bấm từng dòng; kết quả tick được ghi chú vào cột bên cạnh khi nộp phụ lục.
+
+**Kịch bản A — Sniffing plaintext (FTP/SFTP đối chứng):**
+- [ ] Trên capture Wireshark của phiên FTP, chỉ ra ĐÚNG dòng `USER labftpNN` và `PASS ...` trong cửa sổ "Follow TCP Stream", không phải dòng lệnh khác.
+- [ ] Nêu được vì sao dòng đó nằm ở kênh điều khiển (control connection, port 21) chứ không phải kênh data — và vì sao cả file truyền cũng thấy rõ nếu bắt đúng kênh data.
+- [ ] Capture SFTP cùng bài toán: khẳng định "không có chuỗi `USER` nào" bằng cách dùng chính Filter của Wireshark (`user contains "USER"` trên cả packet), giải thích payload nằm trong SSH binary packet protocol đã mã hóa.
+- [ ] Kết luận nêu được 1 limitation: capture được là vì lab đặt switch/mirror/NAT cùng máy — trên mạng thật khó hơn, nhưng phòng thủ vẫn là TLS, không phải "hy vọng không bị bắt gói".
+
+**Kịch bản B — Brute-force + fail2ban (SSH/FTP):**
+- [ ] Trong `auth.log` đếm đủ **N lần FAIL** đúng như số lần thử đã khai (ví dụ N=10), chỉ ra failregex khớp bằng lệnh `fail2ban-regex`.
+- [ ] `fail2ban-client status <jail>` hiện `Currently banned: 1` đúng IP máy attacker (IP lab, đã redact trên ảnh nếu công bố).
+- [ ] **Kiểm tra tầng nhân:** `ipset list f2b-<jail>` (hoặc `iptables -S`) cho thấy IP thực sự nằm trong set bị DROP — chứng minh ban có tác động ở kernel netfilter, không chỉ "ghi log".
+- [ ] Test lại từ máy attacker: kết nối mới **timeout** (không phải connection refused — vì DROP không trả RST; đây là điểm dễ bị hỏi, cần giải thích được).
+- [ ] **UNBAN trước khi kết thúc demo:** `fail2ban-client unban <IP>`, xác nhận `Currently banned: 0`, để không khóa chính mình khi hội đồng kiểm tra.
+- [ ] Nói được 1 bypass còn tồn tại: distributed botnet với mỗi IP ≤ maxretry thì fail2ban không bắt được → lý do phải kết hợp rate-limit + strong password.
+
+**Kịch bản C — Open relay → đóng relay + submission có auth:**
+- [ ] Trước hardening: swaks tới cổng 25 từ attacker được trả **`250`** (queued) khi recipient KHÔNG thuộc `mydestination`/`mynetworks` — chỉ ra đúng dòng đó.
+- [ ] Sau hardening (`reject_unauth_destination`): cùng lệnh trả **`554 5.7.1 Relay access denied`** — cặp trước/sau phải hiển thị cạnh nhau trong cùng 1 ảnh.
+- [ ] Có auth: submission qua cổng 587 với `-au user -ap passlab123 -tls` được **`250`** và recipient trong lab nhận được — chứng minh "đóng relay nhưng không đóng mail hợp lệ".
+- [ ] **Không spam ra ngoài được**: giải thích vì sao recipient `@gmail.com` bị 554, đồng thời nhắc lab không (và không được) gửi thư thật ra internet.
+- [ ] Bonus (nếu chuẩn bị trước): gửi thư `From: admin@lab.example` từ attacker KHÔNG qua auth bị DKIM/DMARC kiểm — hoặc trình bày record SPF `v=spf1 -all` bằng `dig TXT`.
+
+**Toàn bộ buổi demo (chung):**
+- [ ] Giới thiệu phạm vi lab trong 30 giây đầu ("mọi attack nhắm vào VM của nhóm trong mạng ảo riêng").
+- [ ] Thời lượng ≤ quy định (thường 15–20 phút): phân bổ 5 phút A, 6 phút B, 6 phút C, 3 phút Q&A nháp.
+- [ ] Mọi ảnh trong 8.4 có file tương ứng theo đúng tên; sẵn sàng chiếu lại ảnh khi live có sự cố (kế hoạch B).
+- [ ] Mỗi thành viên trả lời được 1 câu "vì sao" bất kỳ trong bảng 8.3 (chống tình trạng chỉ 1 người làm chính).
+
+### 8.7. Ưu / nhược / kết luận từng giải pháp
+
+Bảng 3 cột dưới đây chốt lại chương 6: giải pháp nào cũng có giá trị và cái giá của nó — đồ án chỉ thuyết phục khi nhóm dám nói "giải pháp X không phải viên đạn bạc". Giám khảo rất hay hỏi đúng phần "nhược".
+
+| Giải pháp | Ưu điểm | Nhược điểm / giới hạn | Kết luận cho lab |
+|---|---|---|---|
+| **SFTP thay FTP** | Encryption mặc định toàn phiên + tính toàn vẹn; chỉ 1 cổng (22) dễ firewall; xác thực key chống phishing/brute password tốt | Không có semantic của FTP (không "resume qua lệnh REST chuẩn" — thuộc implementation); không thay thế được FTP trong workflow legacy đòi cổng 21 | **Khuyến nghị số 1** cho truyền file nội bộ; lab bắt buộc dùng nó |
+| **FTPS (explicit AUTH TLS, RFC 4217)** | Giữ được client/tool cũ chỉ thêm TLS; `ftptls` vsftpd bật được sau 1 cert | Phức tạp vì vẫn mang 2 kênh + passive port range; phải mở range cổng trên firewall; dễ cấu hình sai `require_cert`; không phải lựa chọn IETF khuyến khích mới | Dùng khi buộc giữ FTP; còn lại chọn SFTP |
+| **TLS 1.2/1.3 + cipher hiện đại (ECDHE-AES-GCM/CHACHA20)** | Forward secrecy; chống được sniffing + MITM thụ động; chuẩn hóa (RFC 8446) | Cert phải quản lý vòng đời (hết hạn = hỏng dịch vụ hoặc user quen bấm "Accept" → thành vô nghĩa); self-signed không tạo niềm tin | Bắt buộc cho mọi dịch vụ; **tự động hóa bằng ACME/certbot** nếu có thời gian (khuyến nghị 6.3) |
+| **SPF + DKIM + DMARC** | Phòng spoofing ở tầng DNS — chuẩn duy nhất chống "giả email domain lab"; DMARC cho biết ai đang giả mạo (báo cáo) | SPF vỡ khi forward mail (giải bằng ARC/redirect); DKIM phải ký đúng selector; triển khai 3 tầng cần phối hợp, không "bật 1 nút"; chỉ bảo vệ domain, không chống phishing nội dung | Lab chỉ cần chứng minh `p=reject` + test trên chính `example.invalid` |
+| **fail2ban** | Phát hiện sớm + phản ứng tự động, zero-config cho sshd/vsftpd/dovecot/postfix jail mẫu; chi phí = 0 | Chỉ phản ứng theo log → failregex sai là "bantime ảo"; chậm hơn attack nhanh; thua low-and-slow distributed; có thể ban nhầm (self-ban) → phải có `ignoreip` và quy trình unban | **Đủ cho lab qui mô nhỏ**; ngoài production cần tính đến blocklist/WAF/SIEM |
+| **Firewall đóng cổng plaintext (21/25/110/143 → chỉ mở 22/990/587/993/995)** | Biện pháp rẻ nhất, "một phát ăn ngay" — attack surface giảm ngay cả khi service còn lỗi; dễ demo bằng `ss -tlnp` | Không mã hóa nội dung nếu service bên trong vẫn明文 ở NIC nội bộ; không chống được abuse qua chính cổng mở (authenticated spam) | Bắt buộc làm trước khi demo — "defense in depth" bắt đầu bằng việc tắt cái không cần |
+| **chroot + tắt anonymous (vsftpd)** | Ngăn user FTP nhìn ra hệ thống tệp; chặn đường upload-malware công khai | vsftpd yêu cầu `allow_writeable_chroot` khi chroot writable → cần cấu hình đúng chuỗi tham số; user vẫn đọc/ghi được file trong jail của mình | Bật mặc định; chỉ cho write vào thư mục `incoming` có quyền owner riêng |
+| **Queue/mail-log monitoring (postfix + dovecot logs về một chỗ)** | Phát hiện sớm abuse: `status=sent` lạ, backlog tăng, `Auth failed` dồn — dữ liệu có sẵn, không thêm phần mềm | Đọc log tay không scale; log rotate + timestamp format giữa Ubuntu versions dễ gây nhầm khi phân tích | Lab: kết hợp `journalctl -u postfix -f` + `grep`; khuyến nghị gom về Grafana/Loki/Wazuh nếu mở rộng |
+
+Điểm tổng của bảng: không có giải pháp nào đứng một mình — "đóng cổng plaintext + TLS + auth mạnh + fail2ban + giám sát log" cộng lại mới thành phòng thủ; và mỗi ô "Nhược" chính là các câu what-if mà nhóm nên chủ động nêu ở phần Đánh giá thay vì đợi hội đồng hỏi.
+
+Nguồn:
+- https://www.rfc-editor.org/rfc/rfc4217
+- https://certbot.eff.org/ (ACME)
+- https://github.com/fail2ban/fail2ban/releases (1.1.1 — 2026-08-15; lưu ý `action.d/iptables.conf` được viết lại, ảnh hưởng jail custom)
+- https://documentation.ubuntu.com/server/how-to/security/
+- https://ubuntu.com/about/release-cycle (LTS hiện hành: 26.04 "Resolute Raccoon", 04/2026)
+
+### 8.8. Checklist cuối trước khi nộp báo cáo
+
+Rà 5 phút cuối — mỗi mục là một lỗi phổ biến từng gặp ở đồ án:
+
+- [ ] Dòng đầu tiên mỗi chương đúng cấp heading quy ước; đánh số chương/mục nhất quán (8.1 → H3).
+- [ ] Mọi bảng hiển thị không bị tràn lề khi in A4 (bảng 8.2/8.3 xoay ngang nếu cần).
+- [ ] RFC dẫn trong 8.2 đúng số và đúng năm; không có "tin đồn công nghệ" không nguồn.
+- [ ] 15/15 ảnh mục 8.4 có trong thư mục nộp, đúng tên quy ước 8.5, caption đủ nghĩa khi xem KHÔNG đọc ngữ cảnh.
+- [ ] Đã redact xong: không còn IP công cộng, không còn tên user Windows, không private key, không `/etc/shadow` thật, không mật khẩu thật (chỉ `passlab123`).
+- [ ] Kịch bản A/B/C mỗi cái có đủ 5 bước: mục tiêu → cách làm → kết quả → ảnh → kết luận.
+- [ ] Phần "Giới hạn" nêu rõ: lab mạng riêng, chỉ tấn công máy của nhóm, không spam, không attack hệ thống công cộng — đây là tuyên bố tuân thủ đạo đức, phải có.
+- [ ] Trang cuối: danh mục nguồn (gộp các URL mục 8.2–8.7), format thống nhất `[tác giả/nhà xuất bản, năm, URL]`, kiểm tra tất cả URL mở được.
+- [ ] Đọc to 2 lần: câu nào đọc thấy "vừa hiểu vừa không hiểu" thì viết lại cho người mới bắt đầu — chuẩn viết của cả tài liệu này.
+
+---
+
+## Phụ lục A/B/F: Checklist học theo thứ tự, kế hoạch 7 ngày, phân biệt bắt buộc vs nâng cao
+
+Phụ lục này dành cho người mới bắt đầu đồ án: nó trả lời ba câu hỏi "học gì trước – học gì sau" (Phụ lục A), "trong 7 ngày thì làm gì mỗi ngày" (Phụ lục B), và "cái nào phải xong để đạt điểm sàn, cái nào là điểm cộng" (Phụ lục F). Toàn bộ thực hành chỉ diễn ra trong **lab mạng riêng do nhóm tự dựng** (mạng host-only giữa các máy ảo), không đụng tới bất kỳ hệ thống công cộng nào.
+
+> Ghi chú phiên bản: tính đến tháng 8/2026, bản Ubuntu Server LTS mới nhất là **26.04 LTS "Resolute Raccoon"** (phát hành 23/4/2026, bản vá điểm 26.04.1 ra ngày 27/8/2026). Bản **24.04 LTS "Noble Numbat"** vẫn được hỗ trợ song song. Lab trong đồ án chạy tốt trên cả hai; nếu nhóm bạn đã dựng máy ảo từ 24.04 thì không cần nâng cấp gấp.
+
+---
+
+### Phụ lục A — Checklist kiến thức cần học theo thứ tự
+
+Các mục được sắp xếp theo **quan hệ phụ thuộc (dependency)**: bạn không thể hiểu FTP passive mode nếu chưa hiểu TCP có hai kênh, không hiểu SFTP nếu chưa hiểu SSH, không đọc được log Fail2ban nếu chưa biết dịch vụ ghi log ở đâu. Mỗi mục có một câu hỏi tự kiểm tra — nguyên tắc: **nếu trả lời được câu hỏi đó mà không cần mở tài liệu thì coi như đạt**, tick vào ô `[x]`.
+
+#### A1. Nền tảng mạng (network cơ bản)
+
+- [ ] Mô hình OSI / TCP-IP theo lớp (layer), vai trò của IP và MAC.
+  - *Kiểm tra hiểu bài bằng cách:* tự trả lời — "Khi tester `ping` tới máy server trong mạng host-only, gói tin đi qua những lớp nào và thiết bị nào quyết định đường đi?"
+- [ ] Khái niệm cổng (port), dải well-known ports 0–1023, vì sao dịch vụ dưới 1024 cần quyền root để bind.
+  - *Kiểm tra hiểu bài bằng cách:* tự trả lời — "Vì sao vsftpd phải chạy với quyền root (hoặc dùng cơ chế trao quyền) để nghe cổng 21?"
+- [ ] DNS: bản ghi A (tên → IP), MX (máy nhận mail của domain), TXT (nơi SPF/DKIM/DMARC sống).
+  - *Kiểm tra hiểu bài bằng cách:* tự trả lời — "SPF và DKIM được công bố qua loại bản ghi DNS nào? Vì sao mail server cần đúng tên hostname (FQDN)?"
+- [ ] Mạng riêng / NAT; mạng host-only trong VirtualBox (dải ví dụ `192.168.56.0/24`).
+  - *Kiểmtra hiểu bài bằng cách:* tự trả lời — "Vì sao lab của mình không dùng IP công khai thật, và 'open relay' trong lab có gây hại cho ai không?"
+
+#### A2. TCP và socket
+
+- [ ] Bắt tay ba bước (three-way handshake: SYN → SYN-ACK → ACK) và ý nghĩa trạng thái kết nối.
+  - *Kiểm tra hiểu bài bằng cách:* tự trả lời — "Vẽ 3 bước bắt tay khi kết nối tới cổng 25; gói nào do client gửi trước?"
+- [ ] Mô hình socket listen/accept/connect trên server/client.
+  - *Kiểm tra hiểu bài bằng cách:* tự trả lời — "Lệnh `ss -tlnp` cho thấy cột nào của handshake?"
+- [ ] Hai kênh của FTP: điều khiển (control) và dữ liệu (data); active vs passive mode.
+  - *Kiểm tra hiểu bài bằng cách:* tự trả lời — "Ở chế độ PASV, ai là bên chủ động mở kết nối data, và server báo cổng bằng lệnh nào?"
+
+#### A3. Ý niệm TLS và SSH (TLS/SSH concepts)
+
+- [ ] Mã đối xứng (symmetric) vs bất đối xứng (asymmetric), hash, chữ ký số.
+  - *Kiểm tra hiểu bài bằng cách:* tự trả lời — "Vì sao TLS dùng cả hai loại mã hoá thay vì chỉ một?"
+- [ ] Chứng thư số X.509, Certificate Authority (CA), chuỗi tin cậy (chain of trust).
+  - *Kiểm tra hiểu bài bằng cách:* tự trả lời — "Client 'tin' certificate của server mail trong lab dựa vào điều gì khi ta phát hành internal CA?"
+- [ ] STARTTLS (nâng cấp kết nối plaintext đang mở) vs implicit TLS (mã hoá ngay từ đầu, cổng riêng).
+  - *Kiểm tra hiểu bài bằng cách:* tự trả lời — "Khác biệt giữa cổng 587 (submission/STARTTLS) và 465 (implicit TLS) là gì?"
+- [ ] SSH: cặp khoá public/private, `~/.ssh/authorized_keys`, kênh điều khiển duy nhất.
+  - *Kiểm tra hiểu bài bằng cách:* tự trả lời — "Vì sao nói 'SFTP không phải là FTP có TLS'? Chúng khác nhau ở tầng nào?"
+
+#### A4. Giao thức theo từng cặp
+
+Cặp file: **FTP → FTPS → SFTP**
+
+- [ ] FTP thuần (RFC 959): lệnh `USER/PASS/RETR/STOR/LIST`, cổng 21/20, chế độ anonymous.
+  - *Kiểm tra hiểu bài bằng cách:* tự trả lời — "Mở một phiên FTP bắt được bằng Wireshark, đăng nhập nằm ở gói nào và ở dạng gì (mã hoá hay plaintext)?"
+- [ ] FTPS (RFC 4217 — explicit AUTH TLS; implicit 990): vẫn giữ mô hình 2 kênh.
+  - *Kiểm tra hiểu bài bằng cách:* tự trả lời — "Vì sao FTPS cần cấu dải passive port trong firewall, còn SFTP thì không?"
+- [ ] SFTP (file transfer chạy trong SSH, cổng 22; giao thức định nghĩa qua tài liệu IETF `draft-ietf-secsh-filexfer` chưa thành RFC chuẩn hoá — xem openssh.com).
+  - *Kiểm tra hiểu bài bằng cách:* tự trả lời — "Kẻ tấn công đã có credential SSH thì SFTP còn bảo vệ được gì nữa?"
+- [ ] SSH (mã hoá toàn bộ; RFC cho TLS là 8446 để đối chiếu khái niệm handshake).
+
+Cặp mail: **SMTP → POP3 → IMAP**
+
+- [ ] SMTP (RFC 5321): `EHLO / MAIL FROM / RCPT TO / DATA`, cổng 25/587/465, mở rộng ESMTP AUTH (RFC 4954) và STARTTLS (RFC 3207).
+  - *Kiểm tra hiểu bài bằng cách:* tự trả lời — "Quyết định 'relay' xảy ra ở lệnh nào? Dấu hiệu nào trong log mail cho thấy một relay bị từ chối?"
+- [ ] POP3 (RFC 1939): cổng 110/995, mô hình tải về và (thường) xoá.
+  - *Kiểm tra hiểu bài bằng cách:* tự trả lời — "Vì sao kiểm tra mail bằng POP3 trên hai thiết bị gây mất/mail trùng?"
+- [ ] IMAP (IMAP4rev2 là RFC 9051; bản rev1 cũ RFC 3501): cổng 143/993, mailbox nằm lại server, đồng bộ folder.
+  - *Kiểm tra hiểu bài bằng cách:* tự trả lời — "IMAP khác POP3 ở chỗ dữ liệu nằm đâu, và điều đó ảnh hưởng gì tới dung lượng server và giá trị của log?"
+
+#### A5. Công cụ trên Ubuntu
+
+- [ ] `apt update/upgrade`, `systemctl status|restart`, `journalctl -u <dichvu>`.
+  - *Kiểm tra hiểu bài bằng cách:* tự trả lời — "Sau khi sửa vsftpd.conf, hai lệnh bắt buộc phải chạy là gì?"
+- [ ] `ss -tlnp` (xem cổng đang nghe + process), `tcpdump` (bắt gói trên server), `openssl s_client -starttls smtp`.
+  - *Kiểm tra hiểu bài bằng cách:* tự trả lời — "Làm sao chứng minh service nào đang giữ cổng 993?"
+- [ ] nano/vi chỉnh config; `adduser`, `usermod`; quyền file (`chown`, `chmod`).
+
+#### A6. Log
+
+- [ ] Vị trí log trên Ubuntu: `/var/log/auth.log` (SSH, PAM, vsftpd nếu log vào syslog), `/var/log/mail.log` (Postfix, Dovecot), `/var/log/fail2ban.log`; và `journalctl` khi rsyslog không ghi file.
+  - *Kiểm tra hiểu bài bằng cách:* tự trả lời — "Dòng log nào tương ứng 'một đăng nhập SSH thất bại' và dòng nào tương ứng 'Fail2ban đã ban IP'?"
+- [ ] Đọc hiểu format timestamp + hostname trong log để lần vết (tracing) giữa các dịch vụ.
+
+#### A7. Nguy cơ bị tấn công
+
+- [ ] Sniffing credential plaintext (FTP/POP3/IMAP/SMTP-AUTH không TLS).
+- [ ] Brute-force / password spraying đăng nhập SSH, FTP, mail.
+- [ ] SMTP open-relay bị lợi dụng phát tán mail rác.
+- [ ] FTP anonymous upload (ghi file tuỳ ý → webshell/backdoor lưu trữ).
+- [ ] MITM trên kênh plaintext, downgrade khi ép tắt TLS.
+  - *Kiểm tra hiểu bài bằng cách:* tự trả lời — "Với mỗi nguy cơ trên, TLS *loại bỏ hoàn toàn* được cái nào và chỉ *giảm* được cái nào?"
+
+#### A8. Biện pháp phòng thủ
+
+- [ ] Bắt buộc TLS/SSH cho mọi kênh mang credential; tắt listener plaintext.
+- [ ] Fail2ban (bantime/maxretry/findtime), UFW (chỉ mở cổng cần, nhớ dải passive FTP).
+- [ ] Hardening cấu hình: `sshd_config`, `vsftpd.conf`, `main.cf` (`reject_unauth_destination`), Dovecot `disable_plaintext_auth = yes`.
+- [ ] SPF/DKIM/DMARC ở mức khái niệm (RFC 7208 / 6376 / 7489).
+  - *Kiểm tra hiểu bài bằng cách:* tự trả lời — "Nếu chỉ được làm đúng 3 việc cho máy chủ FTP, bạn chọn 3 việc nào và vì sao?"
+
+#### A9. Lab (kịch bản A/B/C)
+
+- [ ] Kịch bản A: FTP plaintext capture → so sánh với SFTP.
+- [ ] Kịch bản B: brute force trong lab → Fail2ban ban/unban.
+- [ ] Kịch bản C: open relay → phát hiện → sửa.
+  - *Kiểm tra hiểu bài bằng cách:* tự trả lời — "Mỗi kịch bản kết thúc bằng bằng chứng (evidence) nào: ảnh chụp màn hình hay file PCAP?"
+
+#### A10. Viết báo cáo
+
+- [ ] Cấu trúc: mô hình lab → cấu hình → tấn công mô phỏng → phát hiện → khắc phục → đánh giá.
+  - *Kiểm tra hiểu bài bằng cách:* tự trả lời — "Người đọc báo cáo có tái dựng được lab của bạn chỉ từ các file cấu hình bạn đính kèm không?"
+
+**Nguồn:**
+- RFC 959: https://www.rfc-editor.org/info/rfc959 — RFC 5321 (SMTP): https://www.rfc-editor.org/info/rfc5321 — RFC 1939 (POP3): https://www.rfc-editor.org/info/rfc1939 — RFC 9051 (IMAP4rev2): https://www.rfc-editor.org/info/rfc9051 — RFC 4217 (FTPS): https://www.rfc-editor.org/info/rfc4217 — RFC 8446 (TLS 1.3): https://www.rfc-editor.org/info/rfc8446 — RFC 7208 (SPF): https://www.rfc-editor.org/info/rfc7208 — RFC 7489 (DMARC): https://www.rfc-editor.org/info/rfc7489
+- OpenSSH: https://www.openssh.com/portable.html — Ubuntu Server docs: https://documentation.ubuntu.com/server/
+
+---
+
+### Phụ lục B — Kế hoạch 7 ngày
+
+Bảng dưới quy hoạch 1 tuần (mỗi ngày ≈ 4–6 giờ). Cột cuối là **cảnh báo lỗi hay gặp** — đa số thời gian của người mới cháy ở đây chứ không phải ở lý thuyết.
+
+| Ngày | Lý thuyết | Thực hành | Đầu ra / kiểm tra | Cảnh báo lỗi hay gặp |
+|---|---|---|---|---|
+| **1** | Ôn OSI/TCP, DNS, NAT; kiến trúc lab 3 máy: Ubuntu Server (dịch vụ), Ubuntu Desktop (quản trị + Wireshark), tester (Kali hoặc Ubuntu client) — tất cả trong **host-only network** VirtualBox | Cài 3 VM (Ubuntu Server 26.04 hoặc 24.04 LTS); cấu hình IP tĩnh qua **netplan** (`/etc/netplan/00-lab.yaml`, `sudo netplan apply`); mở SSH; `apt update` toàn bộ; tạo user lab | Sơ đồ topo + bảng IP; `ping` thông 3 chiều giữa các máy; ảnh chụp `ip a` | netplan sai indent (YAML kén tab/space) hoặc **quên `chmod 600` file netplan** → cảnh báo bảo mật; chọn sai adapter (NAT thay vì host-only) → các VM không thấy nhau; cloud-init ghi đè cấu hình mạng trên Ubuntu Server (disable cloud-init netplan nếu cấu hình tay) |
+| **2** | FTP: RFC 959, hai kênh, active/passive, anonymous. vsftpd (`/etc/vsftpd.conf`) | `apt install vsftpd`; cấu hình `anonymous_enable=NO`, `local_enable=YES`, `write_enable=YES`; `chroot_local_user=YES` + `allow_writeable_chroot=YES`; tài khoản FTP test. **Làm trước kịch bản A phần 1**: dùng tester `ftp 192.168.56.x`, Desktop chạy Wireshark filter `ftp` bắt plaintext `USER`/`PASS` | PCAP + ảnh capture credential; cấu trúc báo cáo mục "FTP hoạt động" | **Quên cho phép dải passive ports trong UFW** (`pasv_min_port`/`pasv_max_port` trong vsftpd.conf rồi `ufw allow 30000:30099/tcp`) → lệnh `LIST` treo timeout trong khi `login` vẫn OK (đây là lỗi kinh điển nhất của lab FTP); sửa conf quên `systemctl restart vsftpd` |
+| **3** | SSH/SFTP: khoá, `sshd_config`, chroot cho SFTP; so sánh mô hình 2 kênh (FTP/FTPS) vs 1 kênh (SFTP) | Tạo nhóm `sftpusers`; `Match Group sftpusers` với `ChrootDirectory /sftp/%u`, `ForceCommand internal-sftp`, `PasswordAuthentication no` (key-only cho nhóm này); scp/sftp client; **hoàn tất kịch bản A**: bắt lại bằng Wireshark thấy chỉ còn nhiễu mã hoá | Ảnh so sánh side-by-side FTP plaintext vs SFTP; bảng đối chiếu FTP/FTPS/SFTP nháp | **Chroot fail do owner/quyền**: `ChrootDirectory` phải **root-owned và không group/world-writable** (`chown root:root`), ngược lại sshd báo "bad owner or permissions" và drop kết nối; user SFTP đặt shell `/usr/sbin/nologin` nhưng vẫn cần thuộc `AllowGroups`; khoá sai `authorized_keys` quyền 600 |
+| **4** | SMTP (RFC 5321) luồng receive/deliver; POP3 vs IMAP (mô hình mailbox); kiến trúc Postfix (master/subagent) + Dovecot (LDA + IMAP/POP3 provider) | `apt install postfix dovecot-imapd dovecot-pop3d`; `main.cf`: `myhostname`, `mydestination=$myhostname, localhost, mail.lab.local`, `inet_interfaces=all`, `smtpd_recipient_restrictions=permit_mynetworks,reject_unauth_destination`; Dovecot `mail_location=maildir:~/Maildir`, `disable_plaintext_auth=no` (tạm thời để test), `auth_mechanisms=plain login`; nối Postfix→Dovecot SASI qua `smtpd_sasl_type=dovecot`, `smtpd_sasl_path=private/auth`; Thunderbird cấu hình SMTP 25(587)+IMAP 143 trong lab; gửi/nhận nội bộ | Ảnh Thunderbird nhận được mail lab; 1 chu kỳ `mail.log` của một email đi + đến | **Dovecot không auth được Postfix**: socket `private/auth` không cùng vị trí `queue_directory` của Postfix hoặc **quyền socket sai** (nhóm `postfix` phải đọc được → `user = postfix` trong block `unix_listener` của dovecot `master.conf`); `mydestination` thiếu hostname → mail local bị trả về; `myhostname` không phải FQDN → Postfix warn + nhiều server ngoài từ chối (trong lab thì không, nhưng nhớ ghi vào báo cáo) |
+| **5** | TLS: CA tự dựng, STARTTLS vs implicit; RFC 3207 (SMTP STARTTLS), RFC 2595 (IMAP); kiểm certificate bằng `openssl s_client` | Sinh internal CA + server cert (`openssl req -x509 ...`); Postfix: `smtpd_tls_cert_file/key`, `smtp_tls_security_level=may`; Dovecot: `ssl=required`, trỏ cert; bật `submission 587` trong `master.csv`→`master.cf` với `smtpd_tls_auth_only=yes`; Thunderbird xuất/nhập CA để tin cậy; **kịch bản C**: tình nguyên tắt `reject_unauth_destination` tạo open relay, chứng minh bằng `telnet/openssl s_client` gửi thư "mượn" server, **bật lại và chụp log `Relay access denied`** | PCAP có STARTTLS; ảnh log từ chối relay; ảnh Thunderbird hiển thị ổ khoá | **Postfix đọc không được private key**: file key root-only 600 trong khi postfix chạy user `postfix` → `chmod 640 + chgrp postfix` (hoặc `smtpd_tls_key_file` trỏ quyền đúng); CN/SAN không khớp `myhostname` → client cảnh báo; quên thêm CA lab vào kho tin cậy (trust store) của Thunderbird → bị từ chối kết nối TLS; test relay bằng script **phải chạy từ máy lab, không bao giờ nhắm server ngoài** |
+| **6** | Log Syslog/mail log; cơ chế Fail2ban (failregex, jail, banaction); firewall stateful | Đọc `/var/log/mail.log`, `auth.log`, `vsftpd.log` (`xferlog_enable=YES`); cài fail2ban (`apt install fail2ban`, tạo `/etc/fail2ban/jail.local`: `bantime=600`, `findtime=300`, `maxretry=5`; bật jail `[sshd]`, `[postfix]`, thêm filter cho vsftpd); **kịch bản B**: từ tester cố tình gõ sai mật khẩu SSH vài lần → thấy `BAN` trong `fail2ban.log`, `fail2ban-client status sshd`, rồi `unban` thủ công; siết UFW: `ufw allow OpenSSH`, từng dịch vụ, nhớ dải passive FTP đã nói ở Ngày 2 | Ảnh IP bị ban + status jail; bảng cổng UFW cuối cùng khớp bảng cổng dịch vụ | **Quên `ufw allow OpenSSH` trước khi `ufw enable`** → tự khoá mình khỏi SSH (làm qua console VM); jail Fail2ban **regex không match format log thật** → `fail2ban-regex /var/log/auth.log /etc/fail2ban/filter.d/sshd.conf` để debug; Ubuntu dùng journald: cần `backend = systemd` trong jail.local nếu không có rsyslog ghi file; ban luôn IP chính máy tester rồi không unban → tưởng Fail2ban hỏng |
+| **7** | SPF/DKIM/DMARC ở mức khái niệm: ai kiểm tra gì, DNS TXT trông ra sao (`v=spf1 ip4:192.168.56.0/24 -all` mẫu trong lab); tổng kết mô hình phòng thủ nhiều lớp | Hoàn thành báo cáo: đủ ảnh chụp từng bước (evidence), file cấu hình trước/sau, PCAP; luyện phản biện chéo trong nhóm theo kịch bản "người hỏi đóng vai hội đồng" | Báo cáo nháp hoàn chỉnh + slide; checklist Phụ lục A tick đạt ≥ 90% | Ghi evidence thiếu timestamp/hostname; dán cấu hình còn lộ đường dẫn file key (che bớt khi nộp); chỉ trình bày "cách làm" mà quên "vì sao attack đó thành công/thất bại" — hội đồng hay hỏi đúng chỗ đó |
+
+**Nguồn:**
+- Ubuntu release notes (26.04 LTS): https://documentation.ubuntu.com/release-notes/26.04/ — Release cycle: https://ubuntu.com/about/release-cycle
+- vsftpd README/man (gói `vsftpd`): https://manpages.ubuntu.com/manpages/noble/en/man5/vsftpd.conf.5.html — Hướng dẫn FTP của Red Hat (khái niệm tương thích Ubuntu): https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/monitoring_and_managing_system_files_and_the_file_system/setting-up-and-configuring-vsftpd
+- Postfix: https://www.postfix.org/STANDARD_CONFIGURATION_README.html — Dovecot: https://doc.dovecot.org/configuration_manual/
+- OpenSSH: https://www.openssh.com/manual.html — Fail2ban README: https://github.com/fail2ban/fail2ban — Wireshark: https://www.wireshark.org/docs/
+
+---
+
+### Phụ lục F — Phân biệt nội dung bắt buộc vs nâng cao
+
+#### F1. Phần BẮT BUỘC (phải đủ trong báo cáo để đạt yêu cầu tối thiểu)
+
+| # | Hạng mục | Bằng chứng tối thiểu phải nộp |
+|---|---|---|
+| 1 | Toàn bộ demo kịch bản A/B/C | PCAP/ảnh chụp từng bước + cấu hình trước/sau |
+| 2 | So sánh FTP vs SFTP (và vị trí FTPS) | Bảng đối chiếu: cổng, số kênh, chỗ nào mã hoá, credential đi plaintext ở đâu |
+| 3 | Open relay → phát hiện → fix | Log `Relay access denied` + diff `main.cf` |
+| 4 | Plaintext capture trên FTP/POP3/IMAP | Ảnh Wireshark thấy `USER`/`PASS` (chỉ trong lab) |
+| 5 | Fail2ban ban + unban | Ảnh `fail2ban.log` dòng BAN + `fail2ban-client status` |
+| 6 | Bảng 5 giao thức (FTP, SFTP, SMTP, POP3, IMAP) | Cổng mặc định, RFC, plaintext/TLS, dùng để làm gì |
+| 7 | SPF/DKIM/DMARC mức **khái niệm** | Sơ đồ "ai kiểm tra gì": receiver check SPF (RFC 7208), verify DKIM (RFC 6376), đối chiếu alignment theo DMARC (RFC 7489) — không cần triển khai thật |
+
+#### F2. Phần NÂNG CAO (điểm cộng; chọn 2–3 mục làm cho sâu còn hơn làm 8 mục hời hợt)
+
+- **TLS termination với internal CA + giải mã Wireshark bằng `SSLKEYLOGFILE`.** Đặt biến môi trường `SSLKEYLOGFILE` tới một file *trước khi* khởi động client (OpenSSL/browser sẽ ghi session key vào đó), rồi trỏ Wireshark *Edit → Preferences → Protocols → TLS → (Pre)-Master-Secret log filename*. Điểm mấu chốt cần giải thích trong báo cáo: cách này thu key **từ phía client**; dùng private key của server chỉ giải mã được khi cipher **không có forward secrecy** (RSA key exchange), còn TLS 1.3/ECDHE thì không. Kiểm chứng: filter `tls` và thấy "Decrypted".
+- **DKIM key thật ký trên lab.** Triển khai OpenDKIM (hoặc tương tự) để Postfix ký thư nội bộ; dùng `dig TXT default._domainkey.mail.lab.local` xem public phần; kiểm chuỗi `d=`, `s=`, `b=` trong header thư đã ký.
+- **MFA trên SSH.** Thêm lớp OTP qua PAM (ví dụ `libpam-google-authenticator` có trong repo Ubuntu) cho một tài khoản lab; trình bày `AuthenticationMethods publickey,keyboard-interactive`.
+- **Audit script tự động hardening.** Script bash/python kiểm: cổng đang nghe (`ss -tlnp`), phiên SSH (`ss -tn state established '( sport = :22 )'`), cờ plaintext còn bật trong conf — xuất bảng đạt/không đạt. Đây là dạng "defensive tooling" nên khuyến khích nhưng không bắt buộc.
+- **Giám sát bằng cron + alert script.** Job cron mỗi 5–10 phút grep log tìm mẫu `Failed password|BAN|relay=.*5\.7\.` rồi ghi file cảnh báo — trình bày ý tưởng "SIEM mini".
+- **IPv6 trong lab.** Bật dải IPv6 host-only, chứng minh dịch vụ listen `::`, và kiểm UFW `ufw6 status` — pitfall hay gặp: chỉ mở cổng cho IPv4 nên client gọi IPv6 timeout.
+- **LMTP + Maildir.** Thay vì Postfix tự deliver qua LDA, nối Dovecot LMTP (`smtpd` lmtp trong master.cf của dovecot, Postfix `mailbox_transport`/`lmtp_host`) — giải thích được lợi ích tách trách nhiệm MTA vs LDA.
+- **Phân tích PCAP bằng tshark CLI.** Ví dụ mẫu (chỉ trên file PCAP của lab): `tshark -r capture.pcap -Y ftp -T fields -e ftp.command -e ftp.arg` — cho thấy cùng dữ liệu Wireshark hiển thị được nhưng script hoá được để làm báo cáo tự động.
+- **ssh-audit.** Công cụ nguồn mở công khai **`jtesta/ssh-audit`** (PyPI/Snap, MIT license — *lưu ý: repo thuộc về Joseph Testa, không phải "jarun"*): quét banner và đề xuất thuật toán KEX/cipher/MAC của server SSH, cho điểm theo khuyến nghị. Chạy `ssh-audit 192.168.56.x` trên lab rồi so với cấu hình `sshd_config` nhóm đã harden.
+- **Mô hình hoá ATT&CK mapping** cho từng nguy cơ (dùng trong mục "phát hiện sớm"). Các ID đã **kiểm chứng** trên attack.mitre.org tính đến 8/2026:
+
+| Nguy cơ trong lab | Kỹ thuật MITRE ATT&CK | ID (đã verify) |
+|---|---|---|
+| Doạ đoán mật khẩu SSH/FTP/IMAP/SMTP | Brute Force (có sub-technique Password Spraying T1110.003) | [T1110](https://attack.mitre.org/techniques/T1110/) |
+| Dùng tài khoản đánh cắp được từ sniffing / lạm dụng anonymous FTP | Valid Accounts | [T1078](https://attack.mitre.org/techniques/T1078/) |
+| Ngửi credential plaintext trên mạng lab | Network Sniffing | [T1040](https://attack.mitre.org/techniques/T1040/) |
+| Truyền file/C2 qua FTP, SFTP | Application Layer Protocol: File Transfer Protocols | [T1071.002](https://attack.mitre.org/techniques/T1071/002/) |
+| Spam/phishing/C2 mượn kênh mail | Application Layer Protocol: Mail Protocols (từ ATT&CK v12+ đổi tên từ "Email Protocols" thành **"Mail Protocols"**) | [T1071.003](https://attack.mitre.org/techniques/T1071/003/) |
+| Ghi file trái phép lên FTP vùng anonymous-write, sửa dữ liệu trên server | Data Manipulation — **T1565**, **KHÔNG phải T1657** | [T1565](https://attack.mitre.org/techniques/T1565/) |
+
+> ⚠️ **Đính chính quan trọng** (nhóm đừng lặp trong báo cáo): qua kiểm tra trang chính thức, **T1657 = Financial Theft** (thuộc tactic Impact, chỉ các hành vi chiếm tiền như BEC/ransom), còn **Data Manipulation là T1565** với sub-technique T1565.001 (Stored — ví dụ đúng là file trên FTP share), T1565.002 (Transmitted — ví dụ đúng là message bị sửa khi relay), T1565.003 (Runtime). Mapping của mình dùng **T1565**.
+
+- **Lưu ý nguyên tắc:** mọi brute-force/open-relay test chỉ nhắm vào IP trong dải host-only của lab; tài liệu không nêu cú pháp của công cụ tấn công (hydra/medusa…) ngoài mức "chúng tồn tại và dùng trong lab được phê duyệt".
+
+**Nguồn:**
+- Wireshark TLS wiki (SSLKEYLOGFILE): https://wiki.wireshark.org/TLS — mitmproxy hướng dẫn master secrets: https://docs.mitmproxy.org/stable/howto/wireshark-tls/
+- ssh-audit (jtesta): https://github.com/jtesta/ssh-audit — PyPI: https://pypi.org/project/ssh-audit/
+- MITRE ATT&CK: https://attack.mitre.org/techniques/T1078/ · https://attack.mitre.org/techniques/T1110/ · https://attack.mitre.org/techniques/T1040/ · https://attack.mitre.org/techniques/T1071/002/ · https://attack.mitre.org/techniques/T1071/003/ · https://attack.mitre.org/techniques/T1565/ · https://attack.mitre.org/techniques/T1657/
+- RFC 7208 (SPF): https://www.rfc-editor.org/info/rfc7208 — RFC 7489 (DMARC): https://www.rfc-editor.org/info/rfc7489 — DKIM RFC 6376: https://www.rfc-editor.org/info/rfc6376 — OpenDKIM: https://www.opendkim.org/
+
+---
+
+*Hết Phụ lục A/B/F. Quay lại Chương chính để xem chi tiết kỹ thuật từng giao thức; mỗi mục ở Phụ lục A có liên kết ngầm tới đúng mục tương ứng của chương đó.*
+
+---
+
+## Phụ lục C/D/E: Thuật ngữ, 20 câu tự kiểm tra, danh mục tài liệu chính thức
+
+Phụ lục này tổng hợp (C) bảng thuật ngữ dùng xuyên suốt tài liệu, (D) 20 câu hỏi tự kiểm tra kèm đáp án ngắn để người học ôn lại sau mỗi chương, và (E) danh mục tài liệu chính thức (RFC, tài liệu Ubuntu, tài liệu dự án mã nguồn mở, sách/báo cáo chuẩn hóa) kèm trạng thái và ngày truy cập. Mọi khái niệm tấn công chỉ được mô tả ở mức **nguyên lý và phòng thủ**, phục vụ mục đích giáo dục trong lab mạng riêng do nhóm tự dựng.
+
+---
+
+### Phụ lục C — Thuật ngữ (Glossary)
+
+Các thuật ngữ sắp xếp theo bảng chữ cái (không phân biệt hoa/thường), định nghĩa 1–2 dòng kèm thuật ngữ tiếng Anh. Những mục có dấu `→` là tham chiếu chéo trong bảng.
+
+- **AAA** — Bộ ba *Authentication* (xác thực — đúng là ai), *Authorization* (phân quyền — được làm gì), *Accounting/Audit* (ghi nhận — log những gì đã diễn ra). Mọi dịch vụ trong đồ án (FTP, SSH, mail) đều phải đáp ứng cả ba trụ; thiếu log thì không điều tra được sự cố.
+- **Active mode (chế độ chủ động FTP)** — Chế độ FTP mà **server chủ động kết nối ngược** từ port 20 về port tạm của client theo địa chỉ client khai trong lệnh `PORT`. Dễ vỡ khi client đứng sau NAT/firewall (xem → PASSIVE mode).
+- **Anonymous FTP** — FTP cho đăng nhập bằng user `anonymous`, mật khẩu là chuỗi bất kỳ/thông báo email. Tiện để phân phối file công khai nhưng là bề mặt tấn công nếu cho ghi (upload) hoặc lộ dữ liệu nội bộ.
+- **AUTH** — Lệnh mở rộng để bắt đầu phiên mã hóa/xác thực: `AUTH TLS` trong FTPS (RFC 2228/4217) nâng cấp kênh điều khiển lên TLS; `AUTH` trong SMTP (RFC 4954) chọn cơ chế SASL như `PLAIN`, `LOGIN`, `CRAM-MD5`.
+- **Banner** — Chuỗi chào đầu phiên do server gửi (ví dụ Postfix: `220 mail.example.com ESMTP Postfix`). Banner dài/hở lộ tên và phiên bản phần mềm → thu hút quét tự động; nên rút gọn theo nguyên tắc tối thiểu.
+- **Base64** — Cách mã hóa (encoding) nhị phân sang ký tự ASCII (RFC 4648), dùng trong `AUTH LOGIN` của SMTP hay một phần lệnh FTP. **Lưu ý bản chất:** base64 *không phải mã hóa bảo mật* — chỉ cần một lệnh giải mã là thấy lại mật khẩu rõ.
+- **Brute force (tấn công vét cạn)** — Thử dò mật khẩu/key theo sinh tự động toàn bộ không gian từ điển hoặc tổ hợp. Với dịch vụ mail/FTP, dấu hiệu quan sát được trong lab: hàng trăm dòng `Auth failed`/`530 Login incorrect` liên tiếp từ một IP nguồn.
+- **CA (Certificate Authority)** — Tổ chức cấp và ký **certificate** (→), tạo chuỗi tin cậy để client xác định danh tính server khi bắt tay TLS. Trong lab có thể dựng CA riêng (self-signed) và chỉ định client tin tưởng nó.
+- **Certificate (X.509 →)** — File khai báo "công khóa này thuộc về tên miền/nhà cung cấp này", do CA ký. Postfix/Dovecot khai đường dẫn cert trong `main.cf` (`smtpd_tls_cert_file`) và `ssl_cert`.
+- **chroot** — Cơ chế nhốt tiến trình vào một thư mục gốc giả, không nhìn thấy phần còn lại của hệ thống tệp. Trong vsftpd: `chroot_local_user=YES` giới hạn user FTP trong home của họ (xấu nếu user thoát được shell — xem → jail).
+- **Cipher suite (bộ mã hóa)** — Tập hợp thuật toán TLS thỏa thuận lúc bắt tay: trao đổi khóa + mã đối xứng + hash. Ở TLS 1.3 các suite gọn và mạnh, ví dụ `TLS_AES_256_GCM_SHA384`; cần tắt suite cũ có RC4/3DES/NULL trong cấu hình Postfix/Dovecot/OpenSSH.
+- **Client–server** — Mô hình giao tiếp: client gửi yêu cầu, server phục vụ nhiều client (FTP client ↔ vsftpd, MUA ↔ Dovecot). Mọi giao thức trong đồ án theo mô hình này.
+- **Control channel (kênh điều khiển)** — Kênh lệnh của FTP, chạy trên TCP 21; dữ liệu thật đi qua **kênh dữ liệu** riêng (TCP 20 ở active mode hoặc port tạm ở passive) — đặc điểm "hai kênh" dễ gây lỗi firewall nhất của FTP.
+- **Credential stuffing** — Dùng danh sách cặp email/mật khẩu lộ từ vụ rò rỉ này để thử đăng nhập hàng loạt trên dịch vụ khác (khác brute force: không dò mật khẩu, chỉ *nhồi* credential có sẵn). Phòng: bắt buộc mật khẩu mạnh + 2FA, bật Fail2ban với `maxretry` thấp.
+- **DKIM (DomainKeys Identified Mail, RFC 6376)** — Server gửi **ký** email bằng → private key; domain công bố → public key trong DNS TXT (`selector._domainkey.example.com`). Server nhận kiểm chữ ký để chắc nội dung không bị sửa giữa đường.
+- **DMARC (RFC 7489)** — Chính sách DNS TXT tại `_dmarc.example.com`: domain yêu cầu email phải vượt cả SPF lẫn DKIM (alignment) với mức `p=none/quarantine/reject`, kèm địa chỉ nhận báo cáo. DMARC "khóa" hai cơ chế trước thành vòng khép kín chống giả mạo domain.
+- **DNS (Domain Name System)** — Dịch vụ phân giải tên → địa chỉ IP (và các bản ghi MX, TXT...). Toàn bộ SPF/DKIM/DMARC đều "sống" trên DNS; DNS dùng UDP 53 (và TCP khi dữ liệu lớn).
+- **FTPS (FTP over TLS)** — FTP + TLS theo RFC 4217, có hai dạng: **explicit** (vẫn port 21, lên TLS bằng `AUTH TLS`) và **implicit** (port 990, TLS ngay từ đầu). Lưu ý: FTPS ≠ SFTP (→).
+- **FTP (File Transfer Protocol, RFC 959)** — Giao thức chuyển file cổ điển, TCP 21 điều khiển + kênh dữ liệu riêng; nguyên bản truyền **rõ văn bản** kể cả `USER`/`PASS` — lý do chính phải thay bằng FTPS/SFTP.
+- **Firewall** — Thiết bị/phần mềm lọc lưu lượng theo quy tắc. Trong lab Ubuntu dùng UFW/iptables ở phía host và security group ở router ảo.
+- **FQDN (Fully Qualified Domain Name)** — Tên miền gồm cả máy và domain, ví dụ `mail.example.com.` — Postfix yêu cầu khai `myhostname` là FQDN đúng để phiên SMTP và cert khớp nhau.
+- **Handshake (bắt tay)** — Chuỗi trao đổi thỏa thuận tham số trước khi truyền dữ liệu. Thường gặp nhất trong đồ án: **TLS handshake** (xác thực cert, trao đổi khóa, chốt cipher suite). Xem thêm → three-way handshake.
+- **Hash (hàm băm)** — Hàm một chiều biến dữ liệu thành digest cố định (SHA-256...); dùng trong tính toàn vẹn DKIM, chứng thư số, và log. Hash ≠ mật mã đối xứng; không "giải" ngược được.
+- **Hostname** — Tên máy trong mạng (lệnh `hostnamectl` trên Ubuntu). mail server nên đặt hostname trỏ đúng qua DNS ngược, vì nhiều MTA công cộng từ chối kết nối không khớp PTR.
+- **IMAP (Internet Message Access Protocol, RFC 9051 IMAP4rev2)** — Giao thức đọc mail **hộp thư nằm trên server**: nhiều client cùng thấy một trạng thái, hỗ trợ folder/flag/search. Cổng 143 (rõ) và 993 (→ implicit TLS). Thay thế RFC 3501 (IMAP4rev1).
+- **Implicit TLS** — Kết nối được mã hóa TLS ngay từ gói đầu tiên trên một cổng riêng (FTPS 990, SMTPS 465, POP3S 995, IMAPS 993). Đối trọng với **STARTTLS**: lên TLS giữa phiên. RFC 8314 khuyến nghị implicit TLS cho MSA.
+- **Jail (Fail2ban)** — Đơn vị cấu hình ghép một **filter** (regex log) với một **action** (chặn IP): `[sshd]`, `[postfix]`, `[dovecot]`. Xem `fail2ban-client status postfix-sasl` để kiểm chứng trong lab.
+- **journalctl** — Công cụ đọc log của systemd: `journalctl -u postfix -f`, `-u dovecot`, `-u ssh`, `-u fail2ban` — trên Ubuntu bản mới, log dịch vụ nằm trong journald (kèm syslog ở `/var/log/mail.log` qua rsyslog).
+- **Least privilege (đặc quyền tối thiểu)** — Mỗi tiến trình/user chỉ giữ quyền tối thiểu cần: vsftpd chạy `ftp` không phải root, Dovecot có `dovenull`/`vmail`, Postfix phân tách tiến trình privilege separation, key SSH đặt 600. Là trục của mọi bài phòng thủ trong tài liệu.
+- **LMTP (Local Mail Transfer Protocol, RFC 2033/6418)** — Biến thể SMTP cho **giao thư cục bộ**: Postfix (MTA) đẩy thư cho Dovecot lda qua LMTP (`/var/run/dovecot/lmtp` hoặc TCP 24), khác SMTP chỗ không retry toàn phần.
+- **mail queue (hàng đợi thư)** — Nơi Postfix giữ thư chưa gửi được (`postqueue -p` để xem); đối tượng tấn công/lan truyền spam nếu máy thành open relay; quản trị hằng ngày bằng `postsuper`/`postqueue`.
+- **MDA/LDA (Mail Delivery Agent / Local Delivery Agent)** — Khâu cuối giao thư vào mailbox người nhận; trong lab thường là `dovecot-lda` nhận LMTP, hoặc `procmail`. Trong Postfix là tiến trình `local`.
+- **MSA (Mail Submission Agent)** — Dịch vụ nhận thư **từ client đã xác thực** ở cổng 587 (STARTTLS) hoặc 465 (implicit TLS) theo RFC 6409 — tách khỏi MTA công cộng (25) để kiểm soát được người gửi.
+- **MTA (Mail Transfer Agent)** — Chương trình chuyển thư giữa các server: Postfix ở lab là một MTA. Nghe SMTP ở cổng 25, tra DNS MX để route.
+- **MUA (Mail User Agent)** — Ứng dụng người dùng cuối đọc/gửi mail (Thunderbird, webmail). MUA nói chuyện với MSA để gửi và với IMAP/POP3 server để đọc.
+- **NAT (Network Address Translation)** — Cơ chế nhiều host dùng chung một IP công cộng. Kẻ thù của **active mode FTP** (server không biết NAT dịch port nào) và của passive khi server sau NAT — phải cấu hình `pasv_address`/range port.
+- **Open relay** — SMTP server cho **người lạ** nhờ chuyển thư đi nơi khác — "máy phát spam" cho kẻ tấn công và bị liệt blacklist. Test bằng chính `EHLO`/`MAIL FROM` trong lab: nhận thư gửi tới địa chỉ ngoài domain = relay hở.
+- **PASSIVE mode (PASV)** — Chế độ FTP mà **client chủ động** kết nối tới port tạm server mở (server trả về trong đáp lệnh `PASV`). Thân thiện với NAT client nhưng đòi firewall server cho mở dải port tạm (`pasv_min_port`/`pasv_max_port`).
+- **POP3 (Post Office Protocol v3, RFC 1939)** — Giao thức đọc mail "tải về máy, có thể xóa server". Đơn giản nhưng làm mail nằm phơi bày trên client; cổng 110 (rõ) và 995 (implicit TLS). Vẫn là Internet Standard (STD 53), được cập nhật bởi RFC 1957/2449/6186/8314.
+- **Port forwarding** — Chuyển cổng này sang cổng khác/host khác (`ufw route ...`, `ssh -L`, virtual IP trong lab nhiều subnet); nhắc tới khi đi debug FTP qua NAT, không phải kỹ thuật tấn công.
+- **Postfix** — MTA mã nguồn mở mặc định nhiều bản Ubuntu, kiến trúc nhiều tiến trình nhỏ thay cho sendmail cũ; cấu hình chính `/etc/postfix/main.cf`, `master.cf`. Bản đang duy trì: nhánh 3.10.x/3.11.x (8/2026).
+- **Private key (khóa bí mật)** — Nửa cặp khóa bất đối xứng, **giữ kín** (key SSH của user, key ký DKIM, key TLS server); file quyền 600. Lộ private key = phải rotate và thu hồi cert.
+- **Public key (khóa công khai)** — Nửa cặp khóa phân phối công khai (công bố DNS cho DKIM, gửi cho server khi đăng nhập SSH key, nằm trong certificate TLS).
+- **RSA** — Thuật toán mã hóa/chữ ký **bất đối xứng** (→ private key/→ public key), hay gặp trong host key SSH và cert; kích thước khuyến nghị ≥ 2048 bit, ECDSA/Ed25519 gọn hơn.
+- **SASL (Simple Authentication and Security Layer, RFC 4422)** — Khung xác thực "cắm" vào giao thức text-based: SMTP `AUTH` (RFC 4954), IMAP/POP3 `AUTHENTICATE`. Postfix/Dovecot dùng chung SASL qua `smtpd_sasl_type = dovecot`.
+- **socket** — Điểm chốt giao tiếp TCP/UDP trong hệ điều hành (`/var/run/dovecot/lmtp` là UNIX socket); hiểu socket giúp đọc `ss -tlnp` khi kiểm tra dịch vụ nào đang thật sự mở cổng.
+- **SFTP (SSH File Transfer Protocol)** — Chuyển file **chạy trên nền SSH** (cổng 22), không liên quan gì đến FTP — tên dễ nhầm với FTPS. Trong OpenSSH là subsystem `sftp-server` khai trong `sshd_config`; protocol do IETF từng soạn (bộ draft `draft-ietf-secsh-filexfer`, chưa từng thành RFC) và bản OpenSSH phổ biến nhất là version 3.
+- **SMTP (Simple Mail Transfer Protocol, RFC 5321)** — Giao thức chuyển thư giữa server và từ MSA; chạy trên TCP 25 (công cộng), 587/465 (submission). Trả lời bằng mã số ba chữ số: 2xx thành công, 4xx tạm thời, 5xx vĩnh viễn (→ open relay: `554 5.7.1 Relay access denied`).
+- **SMTPS** — Tên dân gian cho implicit TLS ở cổng 465; từng bị "gỡ đăng ký" một thời gian vì cho rằng thừa so với STARTTLS, nay được **phục hồi** như lựa chọn khuyến nghị cho MSA theo RFC 8314. Không nhầm với STARTTLS trên 587.
+- **SPF (Sender Policy Framework, RFC 7208)** — Bản ghi TXT khai "những IP nào được phép gửi mail cho domain tôi"; server nhận so IP kết nối SMTP với danh sách này. Cập nhật RFC 4408 (cũ, đã Historic). SPF một mình chống được *giả envelope sender*, không chống giả tên hiển thị.
+- **SSL (Secure Sockets Layer)** — Tiền thân của → TLS; SSL 2.0/3.0 đã bị khai tử (SSL 3.0 bị chính thức deprecated bởi RFC 7568) vì lỗi thiết kế (POODLE). Ngày nay nói "SSL" thường chỉ là cách gọi dân gian của TLS — không bật SSL trong cấu hình.
+- **STARTTLS** — Lệnh nâng cấp kết nối *đang chạy rõ văn bản* lên TLS ngay trong cùng phiên (`220 ... STARTTLS` → handshake). Điểm yếu so với implicit: bị **downgrade stripping** nếu đối thủ chặn trước thông báo hỗ trợ; mitigations: `smtpd_tls_security_level = may/enforce` (Postfix), buộc `ssl = required` (Dovecot), MSA dùng implicit 465.
+- **Stateful firewall** — Firewall theo dõi trạng thái kết nối: cho lại lưu lượng "đã từng được phép" mà không cần rule hai chiều (iptables `-m state --state ESTABLISHED,RELATED`). Là lý do active mode FTP qua firewall *có thể* hoạt động khi có module conntrack `nf_conntrack_ftp`.
+- **Subnet** — Dải IP cùng mạng logic; lab nên tách subnet riêng (server/client) để mô phỏng NAT, firewall giữa hai vùng và quan sát rõ hướng kết nối bằng Wireshark.
+- **Symmetric encryption (mã hóa đối xứng)** — Một khóa chung để mã/giải (AES-GCM...). Nhanh, dùng cho toàn bộ dữ liệu phiên TLS; bài toán "trao khóa thế nào" do phía bất đối xứng (RSA/ECDSA/DH) giải quyết trong handshake.
+- **Syslog** — Chuẩn/niềm ghi log hệ thống; trên Ubuntu: rsyslog ghi `/var/mail.log` (facility `mail`, `auth`), hoặc đọc qua → journalctl. Log là "camera an ninh": không có log đủ tốt thì Fail2ban và điều tra sự cố đều vô nghĩa.
+- **TCP (Transmission Control Protocol)** — Tầng vận chuyển hướng kết nối, đảm bảo thứ tự/độ tin cậy; mọi giao thức trong tài liệu chạy trên TCP. Server phải có: `ss -tlnp` liệt kê tiến trình đang listen.
+- **Three-way handshake** — Ba bước mở TCP: `SYN` → `SYN-ACK` → `ACK`. Quan sát bằng Wireshark filter `tcp.flags.syn==1 && tcp.flags.ack==0`. Là nền để hiểu vì sao firewall DROP (không SYN-ACK) làm client timeout, còn REJECT trả RST ngay.
+- **TLS (Transport Layer Security)** — Lớp mã hóa "đặt dưới" các giao thức ứng dụng: TLS 1.3 (RFC 8446) là bản hiện hành, 1.2 (RFC 5246) vẫn dùng phổ biến khi client chưa theo kịp. Cung cấp bí mật + toàn vẹn + xác thực server (tùy chọn cả client).
+- **Tunnel (đường hầm)** — Đóng gói giao thức này trong giao thức khác: SSH tunnel (`ssh -L 1143:imap.internal:143`) để đọc IMAP mã hóa qua kênh SSH; hoặc VPN site-to-site giữa hai subnet lab.
+- **UDP** — Tầng vận chuyển không kết nối; các dịch vụ FTP/SSH/mail trong tài liệu **không** dùng UDP, nhưng **DNS** (nền tảng SPF/DKIM/DMARC/MX) dùng UDP 53 → không chặn nhầm khi siết firewall.
+- **UFW** — Frontend firewall đơn giản của Ubuntu: `ufw allow 993/tcp`, `ufw status numbered`. Kèm `fail2ban` để tự động chặn IP brute force vào các rule này.
+- **Username enumeration (liệt kê tên đăng nhập)** — Để lộ "user này có tồn tại hay không" qua khác biệt phản hồi/định thời gian (SMTP `VRFY/EXPN` bật, POP3 `+OK/-ERR` khác nhau theo user, hay SSH trả `bad authentication` chỉ khi user có key). Đóng bằng cách trả lời đồng nhất, tắt VRFY/EXPN, vô hiệu timing side-channel qua rate limit.
+- **X.509** — Cấu trúc chuẩn của certificate và CRL (RFC 5280): tên subject, SAN, thời hạn, chuỗi issuer. Cert TLS của Postfix/Dovecot/vsftpd là X.509; lệnh kiểm tra nhanh: `openssl s_client -connect host:993 -showcerts`.
+
+*(Nguồn: định nghĩa đối chiếu RFC từng giao thức ở Phụ lục E.1, docs Ubuntu/Dovecot/Postfix/OpenSSH ở E.2–E.3; cập nhật 8/2026.)*
+
+---
+
+### Phụ lục D — 20 câu hỏi tự kiểm tra (kèm đáp án)
+
+Cách dùng: trả lời nháp trước, đối chiếu đáp án một dòng, rồi đọc lại đúng mục được dẫn. Bố cục: 5 câu khái niệm nền, 8 câu giao thức, 4 câu nguy cơ, 3 câu phòng thủ.
+
+#### D.1 — Khái niệm nền (5 câu)
+
+1. **TLS giải quyết ba vấn đề gì mà truyền rõ văn bản không có?** — Bí mật (mã hóa), toàn vẹn (không sửa giữa đường), xác thực (đúng server qua cert). *(Xem mục TLS, certificate — Phụ lục C.)*
+2. **Vì sao TLS dùng cả mã đối xứng lẫn bất đối xứng?** — Bất đối xứng để trao khóa/xác thực không cần gặp trước; đối xứng (AES) để mã dữ liệu lớn cho nhanh. *(Xem symmetric encryption, cipher suite.)*
+3. **CA tồn tại để làm gì trong phiên TLS?** — Ký certificate để client kiểm chuỗi tin cậy và tin công khóa nhận được là của đúng domain, không phải kẻ trung gian. *(Xem CA, X.509.)*
+4. **Cho hai ví dụ nguyên tắc least privilege áp lên máy chủ mail/FTP?** — vsftpd `chroot_local_user=YES`; Postfix privilege separation + user `vmail` không shell đăng nhập; key SSH `chmod 600`. *(Xem chroot, least privilege; chương Quản trị.)*
+5. **Stateful firewall khác stateless ở đâu, ích lợi gì cho FTP active?** — Có/ không theo dõi trạng thái phiên; stateful + conntrack cho phép dữ liệu FTP "hồi đáp" vào port tạm mà không mở cả dải. *(Xem stateful firewall, three-way handshake.)*
+
+#### D.2 — Giao thức, cổng, mô hình, lệnh (8 câu)
+
+6. **FTP active mode: dữ liệu đi qua cổng nào và hướng kết nối ra sao?** — Server **từ port 20** chủ động kết nối tới port tạm client khai trong lệnh `PORT`. *(Xem active mode, control channel.)*
+7. **SFTP chạy trên nền giao thức nào, cổng bao nhiêu?** — Nền **SSH, TCP 22**; không phải FTP và không dùng kênh điều khiển/kênh dữ liệu của FTP. *(Xem SFTP.)*
+8. **Kể cổng phổ biến của SMTP công cộng, submission và đọc mail (POP3/IMAP) bản TLS.** — 25 (SMTP), 587 (MSA/STARTTLS), 465 (MSA implicit TLS), 995 (POP3S), 993 (IMAPS), 22 (SFTP). *(Xem bảng cổng ở chương Cài đặt.)*
+9. **587 và 465 khác nhau bản chất ở đâu?** — 587: phiên rõ rồi `STARTTLS` nâng lên; 465: TLS ngay từ gói đầu (implicit); RFC 8314 khuyến nghị 465 để tránh downgrade. *(Xem STARTTLS, implicit TLS, MSA.)*
+10. **Trong sơ đồ Postfix + Dovecot + Thunderbird, thành phần nào là MUA/MSA/MTA/MDA?** — Thunderbird = MUA (gửi qua MSA 587); Postfix = MSA (cổng submission) + MTA (cổng 25); Dovecot lda = MDA qua LMTP. *(Xem MUA, MSA, MTA, MDA, LMTP.)*
+11. **`554 5.7.1 <user@khác-domain>: Relay access denied` trong log Postfix nghĩa là gì?** — Server **từ chối chuyển tiếp** thư tới đích không thuộc domain mình vì người gửi chưa xác thực — hành vi đúng của máy không phải open relay. *(Xem open relay, mail queue; mục D.3.)*
+12. **Bản chất POP3 vs IMAP khiến người dùng multi-device chọn giao thức nào?** — POP3 tải về (và có thể xóa server) → mailbox phân mảnh mỗi thiết bị một góc; IMAP (rev2, RFC 9051) giữ mailbox trên server, đồng bộ flag/folder. *(Xem POP3, IMAP.)*
+13. **Ở FTP, lệnh nào quyết định kênh dữ liệu và kênh điều khiển là gì?** — `PORT` (active) / `PASV` (passive) chọn hướng kênh dữ liệu; kênh điều khiển luôn là TCP 21 (hoặc 990 TLS cho implicit). *(Xem control channel, active mode, PASSIVE mode.)*
+
+#### D.3 — Nguy cơ bị tấn công (4 câu)
+
+14. **Vì sao FTP rõ văn bản nguy hiểm ngay cả khi không ai "tấn công" tích cực?** — `USER`/`PASS` chạy plaintext → bất kỳ ai cùng mạng segment capture được là có credential; kiểm chứng trong lab bằng Wireshark filter `ftp.request.command == "PASS"`. *(Xem FTP; chương Nguy cơ.)*
+15. **Brute force và credential stuffing khác nhau thế nào về dữ liệu đầu vào?** — Brute force **dò** mật khẩu theo từ điển/tổ hợp; stuffing **nhồi** cặp user:pass có thật từng rò rỉ, không cần dò. *(Xem brute force, credential stuffing.)*
+16. **Vì sao bật anonymous FTP thường bị đánh giá rủi ro cao?** — Ai cũng vào được ⇒ nếu có thư mục ghi được, server biến thành nơi chứa malware/phishing; nếu lộ thư mục hệ thống ⇒ thông tin cho kẻ tấn công dựng cuộc tấn công tiếp theo. *(Xem anonymous FTP.)*
+17. **Open relay gây hại gì cho chính chủ máy ngoài chuyện "phát thư giùm"?** — Bị Blacklist (Spamhaus...), tống tiền/ spam flood làm sập mail, lộ IP nội bộ và dùng như bàn đạp phishing — hệ quả: thư hợp lệ của tổ chức bị từ chối theo. *(Xem open relay.)*
+
+#### D.4 — Phát hiện sớm & phòng thủ (3 câu)
+
+18. **Fail2ban jail hoạt động thế nào; ví dụ jail đúng cho lab mail?** — Đọc log → regex filter → khớp nhiều lần trong `findtime` thì action chặn IP. `[postfix-sasl]`/`[dovecot]` trỏ `/var/log/mail.log` (hoặc journal), `bantime` tăng dần. *(Xem jail (Fail2ban), syslog, banner; chương Phòng ngừa.)*
+19. **Không chroot FTP user thì vi phạm điều gì, hậu quả ra sao nếu user đó thoát được?** — Vi phạm → least privilege; thoát lệnh shell (qua `SITE EXEC` nếu cấu hình sai) ⇒ user FTP đọc khắp filesystem với quyền process. Chroot + không cho write-into-root + `allow_writeable_chroot` đúng chỗ. *(Xem chroot, least privilege.)*
+20. **SPF, DKIM, DMARC ghép lại tạo vòng khép kín chống giả mạo như thế nào?** — SPF: đúng *đường* gửi (IP được domain ủy quyền); DKIM: *nội dung* còn nguyên + đúng chủ key; DMARC: đối *chủ domain* hai kết quả trên, ra chính sách reject/quarantine + báo cáo — mỗi cái một mình đều để hở. *(Xem SPF, DKIM, DMARC.)*
+
+*(Nguồn: toàn bộ đáp án bám các mục tương ứng ở Phụ lục C và chuẩn RFC tương ứng — xem E.1; cập nhật 8/2026.)*
+
+---
+
+### Phụ lục E — Danh mục tài liệu chính thức
+
+Quy ước: mỗi mục ghi **URL chính thức + trạng thái + công dụng trong đồ án**. Ngày truy cập/cập nhật: **8/2026**. Trạng thái RFC lấy theo trang RFC Editor (rfc-editor.org) tại thời điểm truy cập.
+
+#### E.1 — RFC (chuẩn hóa IETF)
+
+| RFC | Tên gọi | Trạng thái (RFC Editor, 8/2026) | Dùng để |
+|---|---|---|---|
+| [RFC 959](https://www.rfc-editor.org/rfc/rfc959) | File Transfer Protocol | Internet Standard (STD 9) | Định nghĩa FTP, kênh điều khiển/dữ liệu, lệnh `PORT`/`PASV`/`RETR`/`STOR` |
+| [RFC 5321](https://www.rfc-editor.org/rfc/rfc5321) | SMTP | Internet Standard (STD 10) | Mã hồi đáp SMTP (2xx/4xx/5xx), quy tắc relay, `EHLO` |
+| [RFC 6409](https://www.rfc-editor.org/rfc/rfc6409) | Message Submission for Relay | Proposed Standard | Mô hình MSA, cổng 587, buộc xác thực trước khi chấp nhận thư client |
+| [RFC 8314](https://www.rfc-editor.org/rfc/rfc8314) | Cleartext Considered Obsolete | Proposed Standard | Khuyến nghị implicit TLS cho submission/POP3/IMAP; cơ sở chọn 465/993/995 |
+| [RFC 1939](https://www.rfc-editor.org/rfc/rfc1939) | POP3 | Internet Standard (STD 53; được cập nhật bởi 1957, 2449, 6186, 8314) | Mô hình tải-xóa của POP3, trạng thái TRANSACTION/UPDATE |
+| [RFC 9051](https://www.rfc-editor.org/rfc/rfc9051) | IMAP4rev2 | Proposed Standard (2021; thay thế RFC 3501 IMAP4rev1) | Bản chuẩn hiện hành của IMAP; yêu cầu bắt buộc AUTH/TLS hiện diện sẵn trong spec |
+| [RFC 4217](https://www.rfc-editor.org/rfc/rfc4217) | Securing FTP with TLS (FTPS) | Historic | Explicit vs implicit FTPS, cổng 990, thứ tự `AUTH TLS` |
+| [RFC 2228](https://www.rfc-editor.org/rfc/rfc2228) | FTP Security Extensions | Historic | Nguồn gốc lệnh `AUTH`/`PROT` trong FTPS |
+| [RFC 2487](https://www.rfc-editor.org/rfc/rfc2487) | SMTP over TLS | Historic (được thay bởi RFC 3207) | Giai đoạn đầu chuẩn hóa STARTTLS-TLS |
+| [RFC 3207](https://www.rfc-editor.org/rfc/rfc3207) | SMTP Service Extension for Secure SMTP over TLS | Proposed Standard | Hành vi `STARTTLS` SMTP, giới hạn khi downgrade bị chặn |
+| [RFC 4954](https://www.rfc-editor.org/rfc/rfc4954) | SMTP Service Extension for Authentication | Proposed Standard | `AUTH` SMTP, cơ chế SASL (PLAIN/LOGIN/CRAM-MD5) |
+| [RFC 4422](https://www.rfc-editor.org/rfc/rfc4422) | SASL | Proposed Standard | Định nghĩa khung SASL mà SMTP/IMAP/POP3 dùng |
+| [RFC 7208](https://www.rfc-editor.org/rfc/rfc7208) | SPF | Proposed Standard (cập nhật RFC 4408 — Historic) | Bản SPF hiện hành, quy tắc chấm điểm `pass/fail/softfail` |
+| [RFC 6376](https://www.rfc-editor.org/rfc/rfc6376) | DKIM | Proposed Standard | Cấu trúc header `DKIM-Signature`, selector/key trong DNS |
+| [RFC 7489](https://www.rfc-editor.org/rfc/rfc7489) | DMARC | Proposed Standard | Bản ghi `_dmarc`, alignment, cơ chế báo cáo |
+| [RFC 8446](https://www.rfc-editor.org/rfc/rfc8446) | TLS 1.3 | Proposed Standard | Cipher suite TLS 1.3, handshake rút gọn — chuẩn mã hóa tham chiếu |
+| [RFC 5246](https://www.rfc-editor.org/rfc/rfc5246) | TLS 1.2 | Proposed Standard | Bối cảnh tương thích khi chưa bật TLS 1.3 |
+| [RFC 7568](https://www.rfc-editor.org/rfc/rfc7568) | Deprecating SSL 3.0 | Historic | Cứu chứng "tắt SSL" trong mọi cấu hình |
+| [RFC 5280](https://www.rfc-editor.org/rfc/rfc5280) | X.509 PKI Certificate and CRL Profile | Proposed Standard | Cấu trúc certificate TLS/DKIM dùng |
+| [RFC 4251](https://www.rfc-editor.org/rfc/rfc4251)/[4252](https://www.rfc-editor.org/rfc/rfc4252)/[4253](https://www.rfc-editor.org/rfc/rfc4253)/[4254](https://www.rfc-editor.org/rfc/rfc4254) | SSH Architecture / Authentication / Transport / Connection | Proposed Standard (4253 được cập nhật tiếp bởi RFC 6668, 8268, 8308, 8332, 8709, 8758, 9142 theo RFC Editor) | Nền của SFTP/SSH tunnel: kiến trúc, thuật toán transport, auth |
+| — | SFTP (file transfer subsystem) | **Không có RFC chính thức** — bộ IETF draft `draft-ietf-secsh-filexfer-*` (dừng ở -13, chưa thành chuẩn); thực tế tuân theo bản OpenSSH protocol version 3 | Giải thích vì sao hai triển khai SFTP có thể lệch hành vi so nhau |
+| [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119) + [RFC 8174](https://www.rfc-editor.org/rfc/rfc8174) | Keywords for Requirement Levels | BCP 14 | Đọc đúng MUST/SHOULD/MAY khi trích RFC |
+| [RFC 6335](https://www.rfc-editor.org/rfc/rfc6335) | IANA Procedures — Service Name and Transport Protocol Port Number Registry | BCP 165 (cập nhật RFC 2780 và các RFC liên quan) | Cơ sở tra cổng chính thức: `https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xhtml` |
+
+#### E.2 — Tài liệu Ubuntu (documentation.ubuntu.com)
+
+| Tài liệu | URL | Công dụng |
+|---|---|---|
+| Ubuntu Server documentation | https://documentation.ubuntu.com/server/ | Hướng dẫn cài/quản trị OpenSSH server, UFW, services; bản LTS hiện hành **26.04 LTS "Resolute Raccoon" (ra 23/04/2026)**, hỗ trợ tới 2031; 24.04 LTS "Noble Numbat" vẫn trong chu kỳ hỗ trợ |
+| Release notes 26.04 | https://documentation.ubuntu.com/release-notes/26.04/ | Đối chiếu phiên bản gói (Postfix 3.10.x, OpenSSH, Dovecot 2.4.x đi kèm bản LTS mới) |
+| Ubuntu Community UFW | https://help.ubuntu.com/community/UFW | Cú pháp `ufw allow`, status, log rule — dùng cho chương Phòng ngừa |
+| Man pages chính thức (manpages.ubuntu.com) | https://manpages.ubuntu.com/ | Tra `journalctl(1)`, `ss(8)`, `ufw(8)` đúng theo bản distro |
+
+#### E.3 — Tài liệu dự án mã nguồn mở
+
+| Dự án | Tài liệu | URL | Công dụng / phiên bản tham chiếu |
+|---|---|---|---|
+| Postfix | BASIC_CONFIGURATION_README | https://www.postfix.org/BASIC_CONFIGURATION_README.html | `myhostname`, `mydestination`, `inet_interfaces`; Postfix 3.10.x/3.11.x đang duy trì (8/2026) |
+| Postfix | TLS_README | https://www.postfix.org/TLS_README.html | `smtpd_tls_security_level`, cert/key, chuỗi mật mã |
+| Postfix | Announcements | https://www.postfix.org/announcements.html | Theo dõi bản vá bảo mật |
+| Dovecot | Docs chính (2.4) | https://doc.dovecot.org/ | `ssl = required`, LMTP, `auth_mechanisms`; **Dovecot 2.4.4 (05/2026)** — lưu ý cấu hình 2.4 **tương thích ngược với 2.3**, cần đọc hướng dẫn nâng cấp |
+| Dovecot | Upgrade 2.3 → 2.4 | https://doc.dovecot.org/main/installation/upgrade/2.3-to-2.4.html | Bước bắt buộc khi lab nâng từ bản cũ |
+| Dovecot | Wiki (2.3) | https://wiki.dovecot.org/ | Tài liệu lịch sử, mẫu cấu hình các mục con |
+| OpenSSH | Man pages portable | https://www.openssh.com/manual.html | `sshd_config(5)`: `Subsystem sftp`, `PasswordAuthentication`, `PermitRootLogin` |
+| OpenSSH (OpenBSD) | sshd_config(5) | https://man.openbsd.org/sshd_config.5 | Bản man chi tiết nhất của từng tham số |
+| vsftpd | Red Hat Enterprise Linux — FTP Servers (System Administrators Guide) | https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/7/html/system_administrators_guide/ch-ftp_servers | Mẫu `vsftpd.conf`, `chroot_local_user`, `pasv_min/max_port`; vsftpd hiện hành 3.0.5 |
+| Wireshark | Display Filter Reference + wiki | https://wiki.wireshark.org/DisplayFilters , https://www.wireshark.org/docs/ | Bộ lọc thực hành quan sát lab: `ftp`, `smtp`, `imap`, `pop`, `ssh`, `tls.handshake.type` |
+| Fail2ban | GitHub + docs | https://github.com/fail2ban/fail2ban , https://fail2ban.readthedocs.io/ | Jail `[postfix]`/`[dovecot]`/`[sshd]`, filter regex, action ban; bản 1.1.x |
+
+#### E.4 — Sách và tài liệu tổ chức khác
+
+| Nguồn | URL | Công dụng |
+|---|---|---|
+| NIST SP 800-61 Rev. 3 — Incident Response Recommendations and Guide | https://csrc.nist.gov/pubs/sp/800/61/r3/final | Khung phát hiện sớm/xử lý sự cố áp cho các chương Nguy cơ & Phòng ngừa (Rev. 3 thay Rev. 2, phát hành 2025) |
+| NIST SP 800-53 Rev. 5 (AC/AU/SC) | https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final | Ánh xạ control: least privilege (AC-6), audit log (AU-*), transmission confidentiality (SC-8) |
+| OWASP Authentication Cheat Sheet | https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html | Khuyến nghị policy mật khẩu, chống brute force/enumeration cho mọi dịch vụ trong đồ án |
+| NVD (National Vulnerability Database) | https://nvd.nist.gov/ | Tra CVE của từng phần mềm nếu cần dẫn chứng (không nêu CVE bừa — chỉ khi có số thật) |
+| E. Nemeth et al., *UNIX and Linux System Administration Handbook* (5th ed., Addison-Wesley, 2017) | — | Chương mail/DNS — nền khái niệm MTA/MSA/MDA |
+| J. Kurose, K. Ross, *Computer Networking: A Top-Down Approach* (8th ed., Pearson, 2021) | — | Nền TCP/UDP, application layer cho người mới |
+
+*(Nguồn: toàn bộ URL đã đối chiếu RFC Editor / site chính thức tại ngày truy cập 8/2026; trạng thái RFC có thể thay đổi khi IETF công bố văn bản mới — kiểm tra lại trước khi trích dẫn trong bản in.)*
