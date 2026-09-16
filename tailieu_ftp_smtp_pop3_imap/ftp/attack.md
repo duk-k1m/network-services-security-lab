@@ -9,12 +9,17 @@ FTP risk concentrates around cleartext transport, weak or anonymous authenticati
 ### FTP Security Considerations
 
 - **Link:** [RFC 2577: FTP Security Considerations](https://www.rfc-editor.org/rfc/rfc2577)
+
 - **Type:** RFC
+
 - **Level:** Intermediate
+
 - **Why read:** Enumerates protocol and deployment risks, including authentication, bounce behavior, and data-channel concerns.
 
 - [MITRE ATT&CK T1040: Network Sniffing](https://attack.mitre.org/techniques/T1040/) - maps cleartext exposure to a documented adversary technique.
+
 - [MITRE ATT&CK T1110: Brute Force](https://attack.mitre.org/techniques/T1110/) - provides technique context for repeated authentication attempts.
+
 - [Wireshark Sample Captures](https://wiki.wireshark.org/SampleCaptures) - safe public capture material for practicing analysis workflows.
 
 ## Authentication
@@ -43,11 +48,11 @@ Check the vendor's security advisories for the exact FTP server version in scope
 
 ## Our Notes
 
-| Security Event | Observable Evidence | Detection Source | Defensive Control | Forensic Artifact |
-|---|---|---|---|---|
-| Cleartext login | USER and PASS in control traffic | PCAP | Migrate to FTPS or SFTP | Session timeline and exposed account |
-| Repeated login failure | Dense failure sequence from one source | Service and auth logs | Rate limiting and account policy | Source-IP and target-account summary |
-| Unauthorized upload | New file and transfer command | FTP and filesystem logs | Least-privilege write permissions | File hash, owner, timestamp |
+| Security Event         | Observable Evidence                    | Detection Source        | Defensive Control                 | Forensic Artifact                    |
+| ---------------------- | -------------------------------------- | ----------------------- | --------------------------------- | ------------------------------------ |
+| Cleartext login        | USER and PASS in control traffic       | PCAP                    | Migrate to FTPS or SFTP           | Session timeline and exposed account |
+| Repeated login failure | Dense failure sequence from one source | Service and auth logs   | Rate limiting and account policy  | Source-IP and target-account summary |
+| Unauthorized upload    | New file and transfer command          | FTP and filesystem logs | Least-privilege write permissions | File hash, owner, timestamp          |
 
 ## Related
 
@@ -55,3 +60,4 @@ Check the vendor's security advisories for the exact FTP server version in scope
 - [FTP Defense](./defense.md)
 - [FTP Forensics](./forensics.md)
 
+gitcheck
