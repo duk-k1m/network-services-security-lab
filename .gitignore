@@ -1,16 +1,9 @@
-# OS files
+# Backup / extract thu cong - khong push
+_zip_extract/
+network-services-security-lab/
+*.zip
+
+# OS
 Thumbs.db
 Desktop.ini
 .DS_Store
-
-# IDE
-.vscode/
-.idea/
-*.swp
-
-# Node
-node_modules/
-
-# Temp
-*.tmp
-*.log
